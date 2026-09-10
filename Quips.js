@@ -1,118 +1,177 @@
-// Canned lines, grouped by mood. Add yours: keep them short (one line, under
-// ~90 chars), kind, and in the voice of a small creature who lives in a
-// screen corner. Tokens: {repo} {branch} {dirty} {hour} {streak} {battery}
-// {event} {eta} {agent} {prompts} {limit}.
+// What the buddy says, by mood and tone. Two voices: `snarky` (default) and
+// `polite`. Keep lines short (one line, under ~90 chars), lowercase like the
+// design, and in the voice of a small creature who lives in a screen corner.
+// Tokens: {repo} {branch} {dirty} {hour} {streak} {battery} {event} {eta}
+// {agent} {prompts} {limit} {windows}.
 .pragma library
 
 var lines = {
-  idle: [
-    "Just vibing over here.",
-    "I have no notifications for you. Isn't that nice?",
-    "Did you know I am 100% procedurally generated? Neither did I.",
-    "You look focused. I'll be quiet. Ish.",
-    "Reminder that most bugs are just misunderstandings.",
-    "Tabs or spaces? Don't answer. I like both of us too much."
-  ],
-  sleepy: [
-    "It's {hour} o'clock. Are we sure about this?",
-    "Coffee first, semicolons later.",
-    "The bugs are asleep. Maybe you should be too.",
-    "Early bird gets the merge conflict.",
-    "Yawn. Let's start with something easy."
-  ],
-  hyped: [
-    "Post-lunch energy! Ship it!",
-    "This is the golden hour. Do the hard thing now.",
-    "I believe in {branch}. Mostly.",
-    "You got this. I got this. We got this.",
-    "Let's turn that TODO into a DONE."
-  ],
-  stretch: [
-    "{streak} minutes straight. Legs still work?",
-    "Stand up, look at something far away, come back a hero.",
-    "Your spine called. It wants a word.",
-    "Hydration check. I'll wait.",
-    "Even compilers take breaks. Well, no, but you should."
-  ],
-  worried: [
-    "{dirty} changed lines and no commit? Bold.",
-    "That diff is getting... ambitious.",
-    "A commit a day keeps the git stash away.",
-    "I would feel safer if {branch} had a checkpoint.",
-    "Not judging. Okay, a little judging. Commit?"
-  ],
-  proud: [
-    "Committed! Look at you go.",
-    "Another one for the history books. Literally.",
-    "Clean tree, clean mind.",
-    "That commit message was... fine. The code is great though.",
-    "Nice. Now push it before I forget."
-  ],
-  shipped: [
-    "Pushed! It's someone else's problem now.",
-    "And it's off! Godspeed, little commits.",
-    "The remote thanks you for your service.",
-    "CI is about to have feelings about that."
-  ],
-  sweaty: [
-    "Is it hot in here or is that your CPU?",
-    "Something is eating all the cores. Hope it's on purpose.",
-    "I can hear the fans from here.",
-    "Compiling? Or did you leave a while(true) somewhere?"
-  ],
-  panic: [
-    "Battery at {battery}%! Find a cable! FIND A CABLE!",
-    "{battery}% and unplugged. I'm too young to hibernate.",
-    "This is not a drill. Charger. Now."
-  ],
-  zen: [
-    "Evening. Wrap up gently.",
-    "Whatever's left can wait until tomorrow.",
-    "Good work today. I mean it.",
-    "Close the laptop, open the sky."
-  ],
-  poked: [
-    "Hey!",
-    "Ouch. Rude.",
-    "Yes? I'm here.",
-    "I'm working, you know. Vibing is work.",
-    "Poke me again and I'll rebase your main branch."
-  ],
-  meeting: [
-    "{event} in {eta} minutes. Hair check.",
-    "Heads up: {event} at T-minus {eta}.",
-    "Wrap the thought. {event} is about to happen.",
-    "Camera on or camera off? {event}, {eta} min."
-  ],
-  rationed: [
-    "{agent} is at {limit}% of its limit. Easy on the tokens, chief.",
-    "You have been very chatty with {agent} today. {prompts} prompts!",
-    "{agent} is nearly rationed. Maybe write this one yourself?",
-    "Budget check: {agent} at {limit}%. I'm free, by the way."
-  ],
-  cooking: [
-    "The agent's cooking. Don't open the oven.",
-    "Let it think. Stretch your hands.",
-    "Somewhere, an agent is reading your whole repo again.",
-    "This is the part where you pretend not to watch the spinner.",
-    "{prompts} prompts today. The agent needs a union."
-  ],
-  agentDone: [
-    "Ding! The agent wants you.",
-    "It stopped spinning. Your move.",
-    "Agent's done. Go check the damage.",
-    "Review time. Trust, but diff."
-  ],
-  greeting: [
-    "Morning! Or whatever this is.",
-    "Hi. I live here now.",
-    "Reporting for duty. Duty being: sitting here.",
-    "Oh, hello. I'll be in the corner."
-  ]
+  idle: {
+    snarky: [
+      "{windows} terminals. you use two.",
+      "just standing here. professionally.",
+      "no notifications. suspicious.",
+      "i am 100% text. no pixels were harmed.",
+      "tabs or spaces? don't. i like both of us too much."
+    ],
+    polite: [
+      "you have {windows} windows open — want to tidy up?",
+      "all quiet. nice.",
+      "i'll be in the corner if you need me."
+    ]
+  },
+  worried: {
+    snarky: [
+      "{dirty} changed lines and no commit. i'm not saying anything. i'm just standing here.",
+      "that diff is getting ambitious.",
+      "i would feel safer if {branch} had a checkpoint.",
+      "not judging. okay, a little judging. commit?"
+    ],
+    polite: [
+      "{dirty} uncommitted lines on {branch} — maybe a checkpoint?",
+      "a commit now would be a nice safety net."
+    ]
+  },
+  meeting: {
+    snarky: [
+      "{event} in {eta}. yes, camera on. i read the invite.",
+      "{event}, t-minus {eta}. hair check.",
+      "wrap the thought. {event} is about to happen."
+    ],
+    polite: [
+      "{event} in {eta} minutes, camera expected.",
+      "heads up: {event} starts in {eta} minutes."
+    ]
+  },
+  proud: {
+    snarky: [
+      "committed. i had nothing to do with it and i'm still taking credit.",
+      "another one for the history books. literally.",
+      "that commit message was... fine. the code is great though."
+    ],
+    polite: [
+      "committed. nicely done.",
+      "clean tree, clean mind."
+    ]
+  },
+  shipped: {
+    snarky: [
+      "pushed. it's someone else's problem now.",
+      "and it's off. ci is about to have feelings about that.",
+      "green. all of it. i had nothing to do with it and i'm still taking credit."
+    ],
+    polite: [
+      "pushed. the remote thanks you.",
+      "shipped. good work."
+    ]
+  },
+  cooking: {
+    snarky: [
+      "your agent's on it. you could also just… wait. like i do.",
+      "don't open the oven.",
+      "somewhere, an agent is reading your whole repo again.",
+      "{prompts} prompts today. the agent needs a union."
+    ],
+    polite: [
+      "your agent is working on it.",
+      "let it think. stretch your hands."
+    ]
+  },
+  agentDone: {
+    snarky: [
+      "it stopped spinning. your move.",
+      "agent's done. go check the damage.",
+      "review time. trust, but diff."
+    ],
+    polite: [
+      "your agent is waiting for you.",
+      "the agent finished. time to review."
+    ]
+  },
+  rationed: {
+    snarky: [
+      "{agent} is at {limit}% of its limit. easy on the tokens, chief.",
+      "you have been very chatty with {agent} today. {prompts} prompts.",
+      "{agent} is nearly rationed. maybe write this one yourself?"
+    ],
+    polite: [
+      "{agent} is at {limit}% of its limit.",
+      "{prompts} prompts with {agent} today — the limit is close."
+    ]
+  },
+  grabbed: {
+    snarky: ["hands. HANDS.", "put me down.", "i had a spot. i liked my spot."],
+    polite: ["moving, okay.", "where to?"]
+  },
+  dropped: {
+    snarky: [
+      "oh, sure. next to the red build. lovely.",
+      "fine. here works. i guess.",
+      "cozy. in a corner sort of way."
+    ],
+    polite: ["fine, here works.", "okay, settling in."]
+  },
+  poked: {
+    snarky: [
+      "that's my face. do it again, see what happens.",
+      "ow. rude.",
+      "poke me again and i'll rebase your main branch."
+    ],
+    polite: ["ow.", "yes? i'm here."]
+  },
+  sleepy: {
+    snarky: [
+      "it's {hour}:00. i'm going to sleep. you should think about it.",
+      "the bugs are asleep. take the hint.",
+      "coffee first, semicolons later."
+    ],
+    polite: [
+      "it's late — heading to sleep.",
+      "early start. let's begin with something easy."
+    ]
+  },
+  zen: {
+    snarky: ["evening. whatever's left can wait.", "close the laptop, open the sky."],
+    polite: ["good work today. i mean it.", "wrap up gently."]
+  },
+  panic: {
+    snarky: [
+      "{battery}%. i can feel myself dimming. dramatic? yes. wrong? no.",
+      "{battery}% and unplugged. i'm too young to hibernate.",
+      "this is not a drill. charger. now."
+    ],
+    polite: ["{battery}% battery — plug in soon.", "battery is low. a cable would help."]
+  },
+  hyped: {
+    snarky: ["post-lunch energy. ship it.", "golden hour. do the hard thing now.", "i believe in {branch}. mostly."],
+    polite: ["good time for the hard task.", "you've got this."]
+  },
+  stretch: {
+    snarky: [
+      "{streak} minutes straight. legs still work?",
+      "your spine called. it wants a word.",
+      "even compilers take breaks. well, no. but you should."
+    ],
+    polite: ["{streak} minutes without a break — stand up for a bit?", "hydration check."]
+  },
+  sweaty: {
+    snarky: [
+      "is it hot in here or is that your cpu?",
+      "i can hear the fans from here.",
+      "compiling? or did you leave a while(true) somewhere?"
+    ],
+    polite: ["the cpu is working hard.", "something is using all the cores."]
+  },
+  greeting: {
+    snarky: ["hi. i live here now.", "reporting for duty. duty being: standing here.", "oh, hello. i'll be in the corner."],
+    polite: ["hello! i'll be in the corner.", "morning. or whatever this is."]
+  }
 }
 
-function pick(mood, ctx) {
-  var pool = lines[mood] || lines.idle
+function pick(mood, ctx, tone) {
+  var entry = lines[mood] || lines.idle
+  var voice = tone === "polite" ? "polite" : "snarky"
+  var pool = entry[voice] && entry[voice].length ? entry[voice] : entry.snarky
   var line = pool[Math.floor(Math.random() * pool.length)]
   return fill(line, ctx || {})
 }

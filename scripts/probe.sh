@@ -67,6 +67,7 @@ fi
 # Live agent windows: Omarchy gives them one class. Claude Code and friends
 # put a spinner glyph in the title while they work, so count those as busy.
 agent_windows=0 agent_busy=0
+windows="$(hyprctl clients -j 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
 if wins="$(hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.class == "org.omarchy.agent") | .title')"; then
   agent_windows="$(printf '%s\n' "$wins" | grep -c . || true)"
   agent_busy="$(printf '%s\n' "$wins" | grep -cE '^[◐◑◒◓✳✻✽✶✢⏺]' || true)"
@@ -83,9 +84,9 @@ jq -cn \
   --argjson battery "$battery" --argjson charging "$charging" \
   --argjson load "$load1" --argjson cores "$cores" --argjson hour "$hour" \
   --argjson calHas "$cal_has" --arg calTitle "$cal_title" --argjson calEta "${cal_eta:-0}" \
-  --argjson agents "$agents_json" --argjson agentWindows "${agent_windows:-0}" --argjson agentBusy "${agent_busy:-0}" \
+  --argjson agents "$agents_json" --argjson agentWindows "${agent_windows:-0}" --argjson agentBusy "${agent_busy:-0}" --argjson windows "${windows:-0}" \
   '{cwd:$cwd, repo:$repo, branch:$branch, inRepo:$inRepo, dirty:$dirty, untracked:$untracked,
     ahead:$ahead, lastCommit:$lastCommit, battery:$battery, charging:$charging,
     load:$load, cores:$cores, hour:$hour, now:(now|floor),
     calendar:{has:$calHas, title:$calTitle, eta:$calEta},
-    agents:$agents, agentWindows:$agentWindows, agentBusy:$agentBusy}'
+    agents:$agents, agentWindows:$agentWindows, agentBusy:$agentBusy, windows:$windows}'

@@ -1,6 +1,6 @@
 // The buddy's tiny brain. Pure functions from a sensor snapshot (see
 // scripts/probe.sh) plus a few bits of local memory to a mood name, and from
-// a mood name to how the face should look.
+// a mood name to a face.
 .pragma library
 
 // Highest wins. Returns { mood, reason }.
@@ -9,7 +9,7 @@ function decide(s, mem) {
   var perCore = s.cores > 0 ? s.load / s.cores : 0
   var sinceCommitMin = s.lastCommit > 0 ? (s.now - s.lastCommit) / 60 : 1e9
 
-  if (s.battery >= 0 && !s.charging && s.battery <= 10)
+  if (s.battery >= 0 && !s.charging && s.battery < 15)
     return { mood: "panic", reason: "battery " + s.battery + "%" }
   if (s.calendar && s.calendar.has && s.calendar.eta <= 10 && s.calendar.eta > -5)
     return { mood: "meeting", reason: s.calendar.title + " in " + s.calendar.eta + " min" }
@@ -24,7 +24,7 @@ function decide(s, mem) {
     return { mood: "worried", reason: s.dirty + " dirty lines" }
   if (mem.streakMin >= 90)
     return { mood: "stretch", reason: Math.round(mem.streakMin) + " min streak" }
-  if (s.hour < 8 || s.hour >= 23)
+  if (s.hour < 8 || s.hour >= 23 || (s.hour >= 20 && mem.ignoredMin >= 20))
     return { mood: "sleepy", reason: "hour " + s.hour }
   if (s.hour >= 20)
     return { mood: "zen", reason: "evening" }
@@ -63,25 +63,28 @@ function events(prev, next) {
   return out
 }
 
-// Face parameters per mood. eye: 0..1 openness, smile: -1..1, brow: -1..1
-// (positive = raised/surprised, negative = furrowed), tint: which theme colour
-// the body leans towards, bob: idle bounce period in ms (0 = still).
+// Face per mood, straight from the design canvas. `role` names a theme
+// colour: accent, red, yellow, green, cyan, muted. `bob` is the idle bounce
+// period in ms (0 = still).
 function face(mood) {
   switch (mood) {
-    case "sleepy":  return { eye: 0.35, smile: 0.1,  brow: -0.2, tint: "muted",  bob: 2600 }
-    case "hyped":   return { eye: 1.0,  smile: 0.9,  brow: 0.6,  tint: "accent", bob: 700 }
-    case "stretch": return { eye: 0.8,  smile: 0.0,  brow: 0.3,  tint: "muted",  bob: 1600 }
-    case "worried": return { eye: 0.9,  smile: -0.5, brow: -0.6, tint: "urgent", bob: 1200 }
-    case "proud":   return { eye: 0.6,  smile: 1.0,  brow: 0.4,  tint: "accent", bob: 500 }
-    case "shipped": return { eye: 1.0,  smile: 1.0,  brow: 0.8,  tint: "accent", bob: 450 }
-    case "sweaty":  return { eye: 0.7,  smile: -0.3, brow: -0.3, tint: "urgent", bob: 350 }
-    case "panic":   return { eye: 1.0,  smile: -0.9, brow: 0.9,  tint: "urgent", bob: 250 }
-    case "zen":     return { eye: 0.5,  smile: 0.4,  brow: 0.0,  tint: "muted",  bob: 3000 }
-    case "poked":   return { eye: 1.0,  smile: -0.2, brow: 0.9,  tint: "accent", bob: 300 }
-    case "meeting": return { eye: 1.0,  smile: 0.0,  brow: 0.8,  tint: "accent", bob: 400 }
-    case "rationed":return { eye: 0.7,  smile: -0.4, brow: -0.4, tint: "urgent", bob: 1400 }
-    case "cooking": return { eye: 0.6,  smile: 0.5,  brow: 0.1,  tint: "normal", bob: 2200 }
-    case "agentDone":return { eye: 1.0, smile: 0.7,  brow: 0.7,  tint: "accent", bob: 500 }
-    default:        return { eye: 0.9,  smile: 0.3,  brow: 0.0,  tint: "normal", bob: 1800 }
+    case "worried":   return { eyes: "◉    ◉", mouth: "▂▂", extra: "",   role: "red",    bob: 1400 }
+    case "meeting":   return { eyes: "◉    ◦", mouth: "○ ", extra: "",   role: "yellow", bob: 500 }
+    case "proud":
+    case "shipped":   return { eyes: "◠    ◠", mouth: "▽ ", extra: "",   role: "green",  bob: 500 }
+    case "cooking":   return { eyes: "◦    ◉", mouth: "~ ", extra: " …", role: "cyan",   bob: 2200 }
+    case "grabbed":   return { eyes: "◉    ◉", mouth: "▂▂", extra: " !", role: "red",    bob: 0 }
+    case "poked":     return { eyes: ">    <", mouth: "▂▂", extra: " !", role: "yellow", bob: 300 }
+    case "dropped":   return { eyes: "–    –", mouth: "‿‿", extra: "",   role: "green",  bob: 1200 }
+    case "sleepy":
+    case "zen":       return { eyes: "–    –", mouth: "‿ ", extra: " ᶻ", role: "muted",  bob: 3000 }
+    case "panic":     return { eyes: "◉    ◉", mouth: "▂▂", extra: " ▪", role: "red",    bob: 250 }
+    case "hyped":     return { eyes: "◠    ◠", mouth: "▽ ", extra: " !", role: "yellow", bob: 600 }
+    case "stretch":   return { eyes: "–    –", mouth: "▁▁", extra: "",   role: "yellow", bob: 1600 }
+    case "sweaty":    return { eyes: "◉    ◉", mouth: "~ ", extra: " ▪", role: "red",    bob: 350 }
+    case "rationed":  return { eyes: "◉    ◦", mouth: "▂▂", extra: "",   role: "red",    bob: 1400 }
+    case "agentDone": return { eyes: "◉    ◉", mouth: "▽ ", extra: " !", role: "cyan",   bob: 500 }
+    case "greeting":  return { eyes: "◠    ◠", mouth: "▁▁", extra: "",   role: "accent", bob: 900 }
+    default:          return { eyes: "◉    ◉", mouth: "▁▁", extra: "",   role: "accent", bob: 1800 }
   }
 }

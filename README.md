@@ -17,14 +17,14 @@ It notices:
   friends. The buddy knows when an agent window is spinning, when it stops
   and wants you back, and when you are about to hit a rate limit.
 
-Everything it says comes from `Quips.js`, a plain list of one-liners you can
-add to. If you run a local [Ollama](https://ollama.com/), it can improvise
+Everything it says comes from `Quips.js`, a plain list of one-liners in two
+voices, snarky and polite, that you can add to. If you run a local [Ollama](https://ollama.com/), it can improvise
 instead.
 
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/<you>/omabuddy.git --enable
+omarchy plugin add https://github.com/wirlen/omabuddy.git --enable
 ```
 
 Then restart the shell once so the panel mounts:
@@ -39,6 +39,7 @@ omarchy restart shell
 | --- | --- |
 | Click it | Pokes it. It says something. |
 | Drag it | Moves it. It snaps to the nearest corner and remembers. |
+| Scroll on it | Grows or shrinks it. The size is remembered. |
 | Right-click it | Mutes or unmutes the speech bubble. |
 
 From a terminal or a script:
@@ -48,7 +49,7 @@ omarchy-shell omabuddy say "build is green"
 omarchy-shell omabuddy poke
 omarchy-shell omabuddy mood proud       # any mood name from Mood.js, for 20 seconds
 omarchy-shell omabuddy state            # JSON of mood, streak, and sensors
-omarchy-shell omabuddy set <key> <value>
+omarchy-shell omabuddy set <key> <value>   # e.g. set size 18, set tone polite
 ```
 
 That `say` call is the hook point. Wire it into anything: a git post-commit
@@ -62,7 +63,8 @@ entry in `~/.config/omarchy/shell.json`. Changes apply immediately.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `corner` | `bottom-right` | `top-left`, `top-right`, `bottom-left`, `bottom-right` |
-| `size` | `72` | Buddy size in pixels |
+| `size` | `14` | Face font size in pixels, 8 to 48. Scrolling on the buddy sets this too. |
+| `tone` | `snarky` | `snarky` or `polite` |
 | `chattiness` | `12` | Minutes between unprompted lines |
 | `muted` | `false` | Hide the speech bubble |
 | `llm` | `off` | `ollama` to improvise lines with a local model |
@@ -73,7 +75,7 @@ entry in `~/.config/omarchy/shell.json`. Changes apply immediately.
 Example entry:
 
 ```json
-{ "id": "roth.omabuddy", "corner": "bottom-left", "llm": "ollama", "ollamaModel": "qwen2.5:3b" }
+{ "id": "wirlen.omabuddy", "corner": "bottom-left", "llm": "ollama", "ollamaModel": "qwen2.5:3b" }
 ```
 
 ## Moods
@@ -94,8 +96,9 @@ voice of a small creature who lives in a screen corner. Tokens `{repo}`,
 One `panel` plugin with `keepLoaded: true`. A fullscreen transparent layer
 window on the Top layer, input-masked to the buddy so the rest of the screen
 clicks through. `scripts/probe.sh` runs every few seconds and prints a JSON
-snapshot of the world. `Mood.js` turns that into a mood. `Face.qml` draws the
-mood from theme colours on a Canvas. No image assets, no daemons.
+snapshot of the world. `Mood.js` turns that into a mood. `Face.qml` draws the mood as block-character
+text art in the shell's monospace font, glowing in a theme colour read from the
+active theme's `colors.toml`. No image assets, no daemons.
 
 Plugin code changes need `omarchy restart shell` because the panel is kept
 loaded across hot-reloads.

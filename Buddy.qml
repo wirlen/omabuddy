@@ -8,18 +8,20 @@
 //
 //   Click        poke it
 //   Drag         move it; it snaps to the nearest corner and remembers
+//   Scroll       grow / shrink it
 //   Right-click  mute / unmute the speech bubble
 //
 //   omarchy-shell omabuddy say "hello"     make it say something
 //   omarchy-shell omabuddy mood proud      force a mood for a while
 //   omarchy-shell omabuddy poke
-//   omarchy-shell omabuddy set llm ollama  (see README for settings)
+//   omarchy-shell omabuddy set tone polite (see README for settings)
 //   omarchy-shell omabuddy state
 
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
+import QtQuick.Effects
 import qs.Commons
 import "Mood.js" as Mood
 import "Quips.js" as Quips
@@ -31,9 +33,9 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string pluginId: String((manifest && manifest.id) || "roth.omabuddy")
-  readonly property string pluginDir: String((manifest && manifest.__sourceDir) || "")
-  readonly property string scriptsDir: Quickshell.env("HOME") + "/.config/omarchy/plugins/" + pluginId + "/scripts"
+  readonly property string pluginId: String((manifest && manifest.id) || "wirlen.omabuddy")
+  readonly property string home: Quickshell.env("HOME")
+  readonly property string scriptsDir: home + "/.config/omarchy/plugins/" + pluginId + "/scripts"
 
   // ---------------------------------------------------------------- settings
   readonly property var pluginEntry: {
@@ -44,7 +46,22 @@ Item {
     return ({})
   }
   readonly property string corner: String(pluginEntry.corner || "bottom-right")
-  readonly property int size: Math.max(40, Number(pluginEntry.size) || 72)
+  readonly property int minSize: 8
+  readonly property int maxSize: 48
+  readonly property int size: Math.min(maxSize, Math.max(minSize, Number(pluginEntry.size) || 14)) // face font size in px
+  // Wheel resizing previews instantly and persists once the wheel goes quiet.
+  property int pendingSize: -1
+  Timer {
+    id: sizeCommit
+    interval: 400
+    onTriggered: { if (root.pendingSize > 0 && root.pendingSize !== root.size) root.updateSetting("size", root.pendingSize); root.pendingSize = -1 }
+  }
+  function nudgeSize(delta) {
+    const from = root.pendingSize > 0 ? root.pendingSize : root.size
+    root.pendingSize = Math.min(root.maxSize, Math.max(root.minSize, from + delta))
+    sizeCommit.restart()
+  }
+  readonly property string tone: String(pluginEntry.tone || "snarky")
   readonly property int chattiness: Math.max(1, Number(pluginEntry.chattiness) || 12) // minutes between unprompted lines
   readonly property bool muted: pluginEntry.muted === true
   readonly property string llm: String(pluginEntry.llm || "off")
@@ -61,6 +78,36 @@ Item {
     return true
   }
 
+  // ----------------------------------------------------------------- palette
+  // The shell exposes accent/urgent/muted; the design also wants green,
+  // yellow and cyan, so read them straight from the active theme's colors.toml.
+  property var themeColors: ({})
+  FileView {
+    path: root.home + "/.local/state/omarchy/current/theme/colors.toml"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.themeColors = root.parseToml(text())
+    onFileChanged: reload()
+  }
+  function parseToml(text) {
+    const out = ({})
+    const re = /^\s*([a-z_]+)\s*=\s*"(#[0-9a-fA-F]{6,8})"/gm
+    let m
+    while ((m = re.exec(String(text || ""))) !== null) out[m[1]] = m[2]
+    return out
+  }
+  function roleColor(role) {
+    const t = root.themeColors
+    switch (role) {
+      case "red":    return t.red    || Color.urgent
+      case "green":  return t.green  || Color.accent
+      case "yellow": return t.yellow || Color.accent
+      case "cyan":   return t.cyan   || Color.accent
+      case "muted":  return t.muted  || Color.muted
+      default:       return t.accent || Color.accent
+    }
+  }
+
   // ------------------------------------------------------------------- state
   property var sensors: null
   property string mood: "idle"
@@ -69,14 +116,16 @@ Item {
   property string line: ""
   property bool bubbleOpen: false
   property real streakMin: 0
+  property real ignoredMin: 0
   property bool userIdle: false
   property double lastLineAt: 0
 
-  readonly property var faceParams: Mood.face(root.mood)
+  readonly property var faceSpec: Mood.face(root.mood)
   readonly property var quipContext: ({
     repo: sensors ? sensors.repo : "", branch: sensors ? sensors.branch : "",
     dirty: sensors ? sensors.dirty : 0, hour: sensors ? sensors.hour : new Date().getHours(),
     streak: Math.round(streakMin), battery: sensors ? sensors.battery : -1,
+    windows: sensors ? sensors.windows : 0,
     event: sensors && sensors.calendar ? sensors.calendar.title : "",
     eta: sensors && sensors.calendar ? sensors.calendar.eta : "",
     agent: Mood.busiestAgent(sensors) ? Mood.busiestAgent(sensors).name : "the agent",
@@ -85,7 +134,7 @@ Item {
   })
 
   function recompute() {
-    const decided = Mood.decide(root.sensors, { streakMin: root.streakMin })
+    const decided = Mood.decide(root.sensors, { streakMin: root.streakMin, ignoredMin: root.ignoredMin })
     const next = root.forcedMood || decided.mood
     root.moodReason = root.forcedMood ? "forced" : decided.reason
     if (next !== root.mood) {
@@ -100,11 +149,11 @@ Item {
     root.lastLineAt = Date.now()
     if (root.llm === "ollama" && !ollama.running) {
       ollama.moodForLine = mood
-      ollama.command = [root.scriptsDir + "/ollama.sh", root.ollamaUrl, root.ollamaModel, mood, JSON.stringify(root.quipContext)]
+      ollama.command = [root.scriptsDir + "/ollama.sh", root.ollamaUrl, root.ollamaModel, mood + " (" + root.tone + ")", JSON.stringify(root.quipContext)]
       ollama.running = true
       return
     }
-    root.say(Quips.pick(mood, root.quipContext))
+    root.say(Quips.pick(mood, root.quipContext, root.tone))
   }
 
   function say(text) {
@@ -114,11 +163,13 @@ Item {
     root.bubbleOpen = true
     bubbleTimer.interval = Math.min(14000, 3500 + clean.length * 60)
     bubbleTimer.restart()
+    talkTimer.interval = Math.min(2600, 600 + clean.length * 35)
     talkTimer.restart()
     face.talking = true
   }
 
   function poke() {
+    root.ignoredMin = 0
     root.forceMood("poked", 4000)
     root.speak("poked", true)
   }
@@ -132,7 +183,7 @@ Item {
 
   Timer { id: forcedTimer; onTriggered: { root.forcedMood = ""; root.recompute() } }
   Timer { id: bubbleTimer; onTriggered: root.bubbleOpen = false }
-  Timer { id: talkTimer; interval: 1400; onTriggered: face.talking = false }
+  Timer { id: talkTimer; onTriggered: face.talking = false }
 
   // --------------------------------------------------------------- sensors
   Process {
@@ -168,7 +219,11 @@ Item {
   }
   Timer {
     interval: 60000; running: true; repeat: true
-    onTriggered: { if (!root.userIdle) root.streakMin += 1; root.recompute() }
+    onTriggered: {
+      if (!root.userIdle) root.streakMin += 1
+      root.ignoredMin += 1
+      root.recompute()
+    }
   }
 
   // Unprompted chatter on a slow clock.
@@ -186,10 +241,10 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         const got = String(text || "").trim()
-        root.say(got ? got : Quips.pick(ollama.moodForLine, root.quipContext))
+        root.say(got ? got : Quips.pick(ollama.moodForLine, root.quipContext, root.tone))
       }
     }
-    onExited: function(code) { if (code !== 0) root.say(Quips.pick(ollama.moodForLine, root.quipContext)) }
+    onExited: function(code) { if (code !== 0) root.say(Quips.pick(ollama.moodForLine, root.quipContext, root.tone)) }
   }
 
   // ------------------------------------------------------------------- ipc
@@ -199,21 +254,23 @@ Item {
     function poke(): string { root.poke(); return "ok" }
     function mood(name: string): string { root.forceMood(name, 20000); root.speak(name, true); return root.mood }
     function state(): string {
-      return JSON.stringify({ mood: root.mood, reason: root.moodReason, streakMin: root.streakMin, muted: root.muted, sensors: root.sensors })
+      return JSON.stringify({ mood: root.mood, reason: root.moodReason, tone: root.tone, streakMin: root.streakMin, muted: root.muted, sensors: root.sensors })
     }
     function set(name: string, value: string): string {
-      const known = ["corner", "size", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "probeSeconds"]
+      const known = ["corner", "size", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "probeSeconds"]
       if (known.indexOf(name) === -1) return "unknown setting: " + name + " (" + known.join(", ") + ")"
       let v = value
       if (name === "muted") v = value === "true"
-      else if (name === "size" || name === "chattiness" || name === "probeSeconds") v = Number(value)
+      else if (name === "size") { v = Number(value); if (!(v >= root.minSize && v <= root.maxSize)) return "size must be " + root.minSize + " to " + root.maxSize }
+      else if (name === "chattiness" || name === "probeSeconds") v = Number(value)
+      else if (name === "tone" && value !== "snarky" && value !== "polite") return "tone must be snarky or polite"
       return root.updateSetting(name, v) ? "ok" : "unavailable"
     }
   }
 
   Component.onCompleted: {
     root.recompute()
-    Qt.callLater(function() { root.say(Quips.pick("greeting", root.quipContext)) })
+    Qt.callLater(function() { root.say(Quips.pick("greeting", root.quipContext, root.tone)) })
   }
 
   // -------------------------------------------------------------------- ui
@@ -233,8 +290,8 @@ Item {
 
     Item {
       id: buddy
-      width: root.size
-      height: root.size
+      width: face.implicitWidth
+      height: face.implicitHeight
 
       readonly property bool atRight: root.corner.indexOf("right") !== -1
       readonly property bool atBottom: root.corner.indexOf("top") === -1
@@ -251,6 +308,8 @@ Item {
       }
       onAtRightChanged: if (!drag.active) park()
       onAtBottomChanged: if (!drag.active) park()
+      onWidthChanged: if (!drag.active) park()
+      onHeightChanged: if (!drag.active) park()
 
       Behavior on x { enabled: !drag.active; NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
       Behavior on y { enabled: !drag.active; NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
@@ -258,16 +317,22 @@ Item {
       Face {
         id: face
         anchors.fill: parent
-        eye: root.faceParams.eye
-        smile: root.faceParams.smile
-        brow: root.faceParams.brow
-        tint: root.faceParams.tint
-        bob: root.faceParams.bob
-        scale: drag.active ? 1.08 : (hover.hovered ? 1.04 : 1.0)
+        pixelSize: root.pendingSize > 0 ? root.pendingSize : root.size
+        eyes: root.faceSpec.eyes
+        mouth: root.faceSpec.mouth
+        extra: root.faceSpec.extra
+        color: root.roleColor(root.faceSpec.role)
+        bob: root.faceSpec.bob
+        scale: drag.active ? 1.06 : (hover.hovered ? 1.03 : 1.0)
         Behavior on scale { NumberAnimation { duration: 120 } }
       }
 
       HoverHandler { id: hover; cursorShape: Qt.OpenHandCursor }
+
+      WheelHandler {
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        onWheel: function(event) { root.nudgeSize(event.angleDelta.y > 0 ? 1 : -1) }
+      }
 
       DragHandler {
         id: drag
@@ -275,10 +340,25 @@ Item {
         cursorShape: Qt.ClosedHandCursor
         xAxis.minimum: 0; xAxis.maximum: panel.width - buddy.width
         yAxis.minimum: 0; yAxis.maximum: panel.height - buddy.height
-        onActiveChanged: if (!active) {
+        property bool grabbed: false
+        onActiveChanged: {
+          // The handler flips active once while the window is being set up;
+          // only a real press counts as a grab, and only a grab counts as a drop.
+          if (active) {
+            if (!centroid.pressed) return
+            grabbed = true
+            root.ignoredMin = 0
+            root.forceMood("grabbed", 60000)
+            root.speak("grabbed", true)
+            return
+          }
+          if (!grabbed) return
+          grabbed = false
           const cx = buddy.x + buddy.width / 2, cy = buddy.y + buddy.height / 2
           const next = (cy < panel.height / 2 ? "top" : "bottom") + "-" + (cx < panel.width / 2 ? "left" : "right")
           if (next === root.corner) buddy.park(); else root.updateSetting("corner", next)
+          root.forceMood("dropped", 3500)
+          root.speak("dropped", true)
         }
       }
 
@@ -291,28 +371,33 @@ Item {
         acceptedButtons: Qt.RightButton
         onTapped: {
           root.updateSetting("muted", !root.muted)
-          root.say(root.muted ? "Okay, talking again." : "Zipping it. Right-click to unzip.")
+          root.say(root.muted ? "okay, talking again." : "zipping it. right-click to unzip.")
         }
       }
     }
 
-    // Speech bubble, hanging off whichever side of the buddy has room.
+    // Speech bubble: foreground on background, one sharp corner pointing at
+    // the buddy. Above the face at the bottom corners, below it at the top.
     Rectangle {
       id: bubble
       visible: opacity > 0
       opacity: root.bubbleOpen ? 1 : 0
       Behavior on opacity { NumberAnimation { duration: 180 } }
 
-      readonly property int maxWidth: Style.space(260)
-      width: bubbleText.width + Style.spacing.md * 2
-      height: bubbleText.height + Style.spacing.sm * 2
-      radius: Style.cornerRadius
-      color: Color.tooltip.background
-      border.color: Color.tooltip.border
-      border.width: Math.max(1, Style.space(1))
+      readonly property int maxWidth: Style.space(250)
+      readonly property int tail: Math.max(1, Style.space(2))
+      readonly property int round: Style.space(8)
+      width: bubbleText.width + Style.space(12) * 2
+      height: bubbleText.height + Style.space(9) * 2
+      color: Color.foreground
+      topLeftRadius: (!buddy.atBottom && !buddy.atRight) ? tail : round
+      topRightRadius: (!buddy.atBottom && buddy.atRight) ? tail : round
+      bottomLeftRadius: (buddy.atBottom && !buddy.atRight) ? tail : round
+      bottomRightRadius: (buddy.atBottom && buddy.atRight) ? tail : round
 
-      x: buddy.atRight ? buddy.x - width - Style.spacing.sm : buddy.x + buddy.width + Style.spacing.sm
-      y: buddy.atBottom ? buddy.y + buddy.height - height - Style.space(4) : buddy.y + Style.space(4)
+      // Sit over the head, flush with the face's outer edge, following the bob.
+      x: buddy.atRight ? buddy.x + buddy.width - width - root.size : buddy.x + root.size
+      y: buddy.atBottom ? buddy.y - height + root.size * 0.1 : buddy.y + buddy.height + Style.space(4)
 
       Text {
         id: bubbleText
@@ -320,10 +405,23 @@ Item {
         width: Math.min(implicitWidth, bubble.maxWidth)
         wrapMode: Text.WordWrap
         text: root.line
-        color: Color.tooltip.text
+        color: Color.background
         font.family: Style.font.family
         font.pixelSize: Style.font.body
+        font.weight: Font.Medium
+        lineHeight: 1.4
       }
+    }
+    MultiEffect {
+      source: bubble
+      anchors.fill: bubble
+      visible: bubble.visible
+      opacity: bubble.opacity
+      z: bubble.z - 1
+      shadowEnabled: true
+      shadowBlur: 1.0
+      shadowOpacity: 0.45
+      shadowVerticalOffset: Style.space(8)
     }
   }
 }
