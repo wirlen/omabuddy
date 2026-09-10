@@ -126,7 +126,9 @@ order of how likely they are to happen:
   If that opens up for panels, size, corner, and tone move there.
 
 Ideas and quips are welcome as issues or pull requests. Keep it kind, keep
-it short, keep it useless.
+it short, keep it useless. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+maintainer notes, including the security and privacy rules every change has
+to follow.
 
 ## Privacy and safety
 
@@ -141,6 +143,8 @@ it short, keep it useless.
   limit percentages) to `ollamaUrl`. The default is localhost, and only
   `http` or `https` URLs are accepted.
 - Every line it shows is rendered as plain text, never markup.
+- These are rules, not accidents. [CONTRIBUTING.md](CONTRIBUTING.md) spells
+  out what a change may read and send, and how to report a vulnerability.
 
 ## License
 
