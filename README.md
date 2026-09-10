@@ -3,6 +3,8 @@
 A small, mostly useless companion for [Omarchy](https://omarchy.org/). It sits
 in a corner of your screen, wears your theme, and has opinions about your day.
 
+![Omabuddy in its corner, judging your terminal count](preview.png)
+
 It notices:
 
 - **The clock.** Sleepy before eight, hyped after lunch, zen in the evening.
