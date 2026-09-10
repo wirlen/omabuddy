@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "roth.omabuddy",
+  "name": "Omabuddy",
+  "version": "0.1.0",
+  "author": "roth",
+  "license": "MIT",
+  "description": "A small, mostly useless desktop companion that lives in a corner, reacts to your git repos, the clock, and your machine, and says things. Optional Ollama-powered voice.",
+  "kinds": ["panel"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Buddy.qml"
+  }
+}

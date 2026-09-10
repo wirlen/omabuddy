@@ -1,0 +1,105 @@
+# Omabuddy
+
+A small, mostly useless companion for [Omarchy](https://omarchy.org/). It sits
+in a corner of your screen, wears your theme, and has opinions about your day.
+
+It notices:
+
+- **The clock.** Sleepy before eight, hyped after lunch, zen in the evening.
+- **Your work streak.** Ninety minutes without a break and it starts nagging you to stand up.
+- **Git.** It follows the working directory of your focused terminal. A big
+  uncommitted diff makes it worry, a commit makes it proud, a push makes it
+  cheer.
+- **Your machine.** Pegged CPUs make it sweat, a low battery makes it panic.
+- **Your calendar.** If [OmaCal](https://github.com/omacal) is installed it reads
+  the same feed as the OmaCal bar widget and warns you ten minutes before a meeting.
+- **Your coding agents.** Omarchy already tracks Claude Code, Codex, and
+  friends. The buddy knows when an agent window is spinning, when it stops
+  and wants you back, and when you are about to hit a rate limit.
+
+Everything it says comes from `Quips.js`, a plain list of one-liners you can
+add to. If you run a local [Ollama](https://ollama.com/), it can improvise
+instead.
+
+## Install
+
+```bash
+omarchy plugin add https://github.com/<you>/omabuddy.git --enable
+```
+
+Then restart the shell once so the panel mounts:
+
+```bash
+omarchy restart shell
+```
+
+## Using it
+
+| Do this | It does |
+| --- | --- |
+| Click it | Pokes it. It says something. |
+| Drag it | Moves it. It snaps to the nearest corner and remembers. |
+| Right-click it | Mutes or unmutes the speech bubble. |
+
+From a terminal or a script:
+
+```bash
+omarchy-shell omabuddy say "build is green"
+omarchy-shell omabuddy poke
+omarchy-shell omabuddy mood proud       # any mood name from Mood.js, for 20 seconds
+omarchy-shell omabuddy state            # JSON of mood, streak, and sensors
+omarchy-shell omabuddy set <key> <value>
+```
+
+That `say` call is the hook point. Wire it into anything: a git post-commit
+hook, a CI notifier, an Omarchy `theme-set` hook.
+
+## Settings
+
+Set with `omarchy-shell omabuddy set <key> <value>`, or edit the plugin's
+entry in `~/.config/omarchy/shell.json`. Changes apply immediately.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `corner` | `bottom-right` | `top-left`, `top-right`, `bottom-left`, `bottom-right` |
+| `size` | `72` | Buddy size in pixels |
+| `chattiness` | `12` | Minutes between unprompted lines |
+| `muted` | `false` | Hide the speech bubble |
+| `llm` | `off` | `ollama` to improvise lines with a local model |
+| `ollamaUrl` | `http://localhost:11434` | Where Ollama listens |
+| `ollamaModel` | `llama3.2` | Any model you have pulled |
+| `probeSeconds` | `20` | How often it looks at git, battery, and load |
+
+Example entry:
+
+```json
+{ "id": "roth.omabuddy", "corner": "bottom-left", "llm": "ollama", "ollamaModel": "qwen2.5:3b" }
+```
+
+## Moods
+
+`idle`, `sleepy`, `hyped`, `stretch`, `worried`, `proud`, `shipped`, `sweaty`,
+`panic`, `zen`, `meeting`, `rationed`, `cooking`, `agentDone`, `poked`, `greeting`. The rules live in `Mood.js`; the face for
+each mood is a handful of numbers in the same file.
+
+## Contributing lines
+
+Open `Quips.js`, find the mood, add a line. Keep it short, kind, and in the
+voice of a small creature who lives in a screen corner. Tokens `{repo}`,
+`{branch}`, `{dirty}`, `{hour}`, `{streak}`, `{battery}`, `{event}`, `{eta}`,
+`{agent}`, `{prompts}` and `{limit}` are filled in.
+
+## How it works
+
+One `panel` plugin with `keepLoaded: true`. A fullscreen transparent layer
+window on the Top layer, input-masked to the buddy so the rest of the screen
+clicks through. `scripts/probe.sh` runs every few seconds and prints a JSON
+snapshot of the world. `Mood.js` turns that into a mood. `Face.qml` draws the
+mood from theme colours on a Canvas. No image assets, no daemons.
+
+Plugin code changes need `omarchy restart shell` because the panel is kept
+loaded across hot-reloads.
+
+## License
+
+MIT
