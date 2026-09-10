@@ -83,6 +83,12 @@ read -r load1 _ < /proc/loadavg
 cores="$(nproc)"
 hour="$(date +%-H)"
 
+# Every --argjson below must be a number or the whole snapshot is lost.
+num() { [[ "$1" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] && printf '%s' "$1" || printf '%s' "$2"; }
+battery="$(num "$battery" -1)"; cal_eta="$(num "$cal_eta" 0)"; load1="$(num "$load1" 0)"
+dirty="$(num "$dirty" 0)"; untracked="$(num "$untracked" 0)"; ahead="$(num "$ahead" 0)"
+last_commit="$(num "$last_commit" 0)"; cores="$(num "$cores" 1)"; hour="$(num "$hour" 12)"
+
 jq -cn \
   --arg cwd "$cwd" --arg repo "$repo" --arg branch "$branch" \
   --argjson inRepo "$in_repo" --argjson dirty "${dirty:-0}" --argjson untracked "${untracked:-0}" \

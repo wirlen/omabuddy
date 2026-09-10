@@ -67,6 +67,7 @@ Item {
   readonly property string llm: String(pluginEntry.llm || "off")
   readonly property string ollamaUrl: String(pluginEntry.ollamaUrl || "http://localhost:11434")
   readonly property string ollamaModel: String(pluginEntry.ollamaModel || "llama3.2")
+  readonly property bool allowRemoteLlm: pluginEntry.allowRemoteLlm === true
   readonly property int probeSeconds: Math.max(5, Number(pluginEntry.probeSeconds) || 20)
 
   function updateSetting(name, value) {
@@ -149,7 +150,8 @@ Item {
     root.lastLineAt = Date.now()
     if (root.llm === "ollama" && !ollama.running) {
       ollama.moodForLine = mood
-      ollama.command = [root.scriptsDir + "/ollama.sh", root.ollamaUrl, root.ollamaModel, mood + " (" + root.tone + ")", JSON.stringify(root.quipContext)]
+      ollama.command = [root.scriptsDir + "/ollama.sh", root.ollamaUrl, root.ollamaModel, mood + " (" + root.tone + ")",
+                        JSON.stringify(root.quipContext), root.allowRemoteLlm ? "remote-ok" : ""]
       ollama.running = true
       return
     }
@@ -191,7 +193,8 @@ Item {
   // --------------------------------------------------------------- sensors
   Process {
     id: probe
-    command: [root.scriptsDir + "/probe.sh"]
+    // A stalled mount under the focused directory must not wedge the probe for good.
+    command: ["timeout", "15", root.scriptsDir + "/probe.sh"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -260,10 +263,11 @@ Item {
       return JSON.stringify({ mood: root.mood, reason: root.moodReason, tone: root.tone, streakMin: root.streakMin, muted: root.muted, sensors: root.sensors })
     }
     function set(name: string, value: string): string {
-      const known = ["corner", "size", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "probeSeconds"]
+      const known = ["corner", "size", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "allowRemoteLlm", "probeSeconds"]
       if (known.indexOf(name) === -1) return "unknown setting: " + name + " (" + known.join(", ") + ")"
       let v = value
-      if (name === "muted") v = value === "true"
+      if (name === "muted" || name === "allowRemoteLlm") v = value === "true"
+      else if (name === "ollamaUrl" && !/^https?:\/\//.test(value)) return "ollamaUrl must start with http:// or https://"
       else if (name === "size") { v = Number(value); if (!(v >= root.minSize && v <= root.maxSize)) return "size must be " + root.minSize + " to " + root.maxSize }
       else if (name === "chattiness" || name === "probeSeconds") v = Number(value)
       else if (name === "tone" && value !== "snarky" && value !== "polite") return "tone must be snarky or polite"

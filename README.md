@@ -72,6 +72,7 @@ entry in `~/.config/omarchy/shell.json`. Changes apply immediately.
 | `llm` | `off` | `ollama` to improvise lines with a local model |
 | `ollamaUrl` | `http://localhost:11434` | Where Ollama listens |
 | `ollamaModel` | `llama3.2` | Any model you have pulled |
+| `allowRemoteLlm` | `false` | Ollama URLs are limited to this machine unless this is `true` |
 | `probeSeconds` | `20` | How often it looks at git, battery, and load |
 
 Example entry:
@@ -138,10 +139,17 @@ to follow.
   usage records. It runs git with hooks-free, config-safe flags so a freshly
   cloned repo cannot run code through its own `.git/config`.
 - Nothing leaves the machine unless you set `llm` to `ollama`. Then each quip
-  request posts a small JSON context (current directory, repo and branch,
-  next calendar title and minutes until it, agent names, prompt counts and
-  limit percentages) to `ollamaUrl`. The default is localhost, and only
-  `http` or `https` URLs are accepted.
+  request posts a small JSON context to `ollamaUrl`. Exactly these fields:
+  repo name (not the path), branch, count of uncommitted changed lines, hour
+  of day, minutes of your current work streak, battery percent, number of
+  open windows, next calendar event title and minutes until it, the busiest
+  agent's name and prompt count, and the highest agent limit percentage.
+- The URL must be `http` or `https` and must point at this machine
+  (localhost, 127.x, or ::1) unless you also set `allowRemoteLlm` to `true`.
+  That guard lives in the script itself, so a stray process flipping the
+  setting over IPC can't quietly turn the buddy into a beacon.
+- The probe gives up after 15 seconds, so a stalled network mount under your
+  terminal can't wedge it.
 - Every line it shows is rendered as plain text, never markup.
 - These are rules, not accidents. [CONTRIBUTING.md](CONTRIBUTING.md) spells
   out what a change may read and send, and how to report a vulnerability.
