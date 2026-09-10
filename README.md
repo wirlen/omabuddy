@@ -105,6 +105,29 @@ active theme's `colors.toml`. No image assets, no daemons.
 Plugin code changes need `omarchy restart shell` because the panel is kept
 loaded across hot-reloads.
 
+## Status and next steps
+
+This is a fun side project, not a product. It works, it's stable on Omarchy 4,
+and it will stay small on purpose. Things that would be fun to add, roughly in
+order of how likely they are to happen:
+
+- **Faster AI replies.** Ollama answers today take a few seconds. Keep the model
+  warm, stream the first line, and let a short canned reaction show while the
+  real one is on its way.
+- **Music.** Notice what's playing over MPRIS and comment on it. Repeat plays,
+  questionable taste, and silence at 3 pm are all fair game.
+- **Build and test results.** The design has a "judging" face for a red build.
+  A `say` hook from your test runner or CI would light it up.
+- **Notifications and system events.** Updates pending, disk nearly full,
+  the theme changing under it.
+- **More faces and voices.** Extra moods, a per-theme colour override, and
+  packs of quips in other languages.
+- **A settings form.** Omarchy only renders settings UI for bar widgets today.
+  If that opens up for panels, size, corner, and tone move there.
+
+Ideas and quips are welcome as issues or pull requests. Keep it kind, keep
+it short, keep it useless.
+
 ## Privacy and safety
 
 - Everything runs as your user inside `omarchy-shell`, like every Omarchy plugin.
