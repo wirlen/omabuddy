@@ -5,6 +5,9 @@
 set -u
 url="${1:-http://localhost:11434}"
 model="${2:-llama3.2}"
+# The context below describes your working directory, branch, next meeting
+# and agent usage. It only ever goes to an http(s) endpoint you configured.
+case "$url" in http://*|https://*) ;; *) exit 1 ;; esac
 mood="${3:-idle}"
 ctx="${4:-{\}}"
 

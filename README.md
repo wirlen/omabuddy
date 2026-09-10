@@ -103,6 +103,20 @@ active theme's `colors.toml`. No image assets, no daemons.
 Plugin code changes need `omarchy restart shell` because the panel is kept
 loaded across hot-reloads.
 
+## Privacy and safety
+
+- Everything runs as your user inside `omarchy-shell`, like every Omarchy plugin.
+- The probe only reads: your focused terminal's working directory, git state
+  there, battery and load from sysfs, the OmaCal feed, and Omarchy's agent
+  usage records. It runs git with hooks-free, config-safe flags so a freshly
+  cloned repo cannot run code through its own `.git/config`.
+- Nothing leaves the machine unless you set `llm` to `ollama`. Then each quip
+  request posts a small JSON context (current directory, repo and branch,
+  next calendar title and minutes until it, agent names, prompt counts and
+  limit percentages) to `ollamaUrl`. The default is localhost, and only
+  `http` or `https` URLs are accepted.
+- Every line it shows is rendered as plain text, never markup.
+
 ## License
 
 MIT

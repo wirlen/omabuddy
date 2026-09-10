@@ -156,9 +156,12 @@ Item {
     root.say(Quips.pick(mood, root.quipContext, root.tone))
   }
 
+  readonly property int maxLineLength: 280
+
   function say(text) {
-    const clean = String(text || "").trim()
+    let clean = String(text || "").trim()
     if (!clean) return
+    if (clean.length > root.maxLineLength) clean = clean.slice(0, root.maxLineLength - 1) + "…"
     root.line = clean
     root.bubbleOpen = true
     bubbleTimer.interval = Math.min(14000, 3500 + clean.length * 60)
@@ -404,6 +407,8 @@ Item {
         anchors.centerIn: parent
         width: Math.min(implicitWidth, bubble.maxWidth)
         wrapMode: Text.WordWrap
+        // Lines carry branch names, calendar titles and model output: never markup.
+        textFormat: Text.PlainText
         text: root.line
         color: Color.background
         font.family: Style.font.family
