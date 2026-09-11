@@ -38,8 +38,28 @@ Item {
   readonly property string scriptsDir: home + "/.config/omarchy/plugins/" + pluginId + "/scripts"
 
   // ---------------------------------------------------------------- settings
+  // The shell API hands panel plugins no view of shell.json, so read our own
+  // plugins[] entry straight from the file and follow it as it changes (the
+  // shell rewrites it whenever updateEntryInline() persists a setting).
+  readonly property string shellConfigPath: home + "/.config/omarchy/shell.json"
+  property var shellConfig: null
+  FileView {
+    id: shellConfigFile
+    path: root.shellConfigPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.readShellConfig(text())
+    onLoadFailed: root.readShellConfig("")
+    onFileChanged: reload()
+  }
+  function readShellConfig(raw) {
+    try {
+      const parsed = JSON.parse(String(raw || "").trim() || "{}")
+      root.shellConfig = parsed && typeof parsed === "object" ? parsed : null
+    } catch (e) { root.shellConfig = null }
+  }
   readonly property var pluginEntry: {
-    const config = shell ? shell.shellConfig : null
+    const config = root.shellConfig || (shell ? shell.shellConfig : null)
     const plugins = config && Array.isArray(config.plugins) ? config.plugins : []
     for (let i = 0; i < plugins.length; i++)
       if (plugins[i] && plugins[i].id === root.pluginId) return plugins[i]
