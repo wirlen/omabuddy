@@ -21,19 +21,21 @@ fi
 
 # The focused directory may be a repo you just cloned and have not read. A
 # repo's own .git/config can name commands to run (core.fsmonitor on status
-# and diff, diff.external on diff), so every call switches those off; -c wins
-# over repo config. Nothing here needs hooks, pagers, or external tools.
-g() { git -c core.fsmonitor=false -c core.pager=cat -c diff.external= "$@"; }
+# and diff, diff.external and diff.*.textconv on diff, gpg.program on log
+# when log.showSignature is set and a commit carries a signature header), so
+# every call switches those off; -c wins over repo config. Nothing here needs
+# hooks, pagers, signatures, or external tools.
+g() { git -c core.fsmonitor=false -c core.pager=cat -c diff.external= -c log.showSignature=false "$@"; }
 
 in_repo=false branch="" dirty=0 untracked=0 ahead=0 last_commit=0 repo=""
 if [[ -n "$cwd" ]] && top="$(g -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"; then
   in_repo=true
   repo="$(basename "$top")"
   branch="$(g -C "$top" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
-  dirty="$(g -C "$top" diff --no-ext-diff --numstat HEAD 2>/dev/null | awk '{a+=$1; d+=$2} END {print a+d+0}')"
+  dirty="$(g -C "$top" diff --no-ext-diff --no-textconv --numstat HEAD 2>/dev/null | awk '{a+=$1; d+=$2} END {print a+d+0}')"
   untracked="$(g -C "$top" ls-files --others --exclude-standard 2>/dev/null | wc -l)"
   ahead="$(g -C "$top" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
-  last_commit="$(g -C "$top" log -1 --format=%ct 2>/dev/null || echo 0)"
+  last_commit="$(g -C "$top" log -1 --no-show-signature --format=%ct 2>/dev/null || echo 0)"
 fi
 
 battery=-1 charging=false

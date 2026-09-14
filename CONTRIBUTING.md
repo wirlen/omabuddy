@@ -25,9 +25,14 @@ These rules apply to every change, however small:
   titles, agent records, model output, and files in the focused directory are
   all untrusted. Build JSON with `jq --arg`, render text as plain text, and
   never pass any of it to a shell unquoted.
-- **Run tools defensively.** Git runs with repo-config command hooks disabled
-  (see `scripts/probe.sh`). Any new external tool needs the same thinking:
-  what can a hostile directory make it do?
+- **Run tools defensively.** Git runs with every repo-config command hook it
+  could reach switched off: fsmonitor, external diff, textconv, and signature
+  verification via gpg.program (see `scripts/probe.sh`). Any new git call or
+  external tool needs the same thinking: what can a hostile directory make it
+  do?
+- **Parse URLs like an attacker wrote them.** The loopback check in
+  `scripts/ollama.sh` refuses userinfo (`localhost@evil`) and matches only
+  `localhost`, `127.x.y.z` and `::1`, never a prefix. Keep it that strict.
 - **Bound every remote response.** Anything read from a network endpoint
   is capped in bytes before it is parsed (see `scripts/ollama.sh`: 64 KiB,
   rejected at max+1, before jq sees it). A time limit alone is not a cap.

@@ -14,12 +14,15 @@ remote_ok="${5:-}"
 # allowRemoteLlm setting is on. Any same-user process can change settings
 # over IPC, so the loopback rule is the last line against a quiet beacon.
 case "$url" in http://*|https://*) ;; *) exit 1 ;; esac
-host="${url#*://}"; host="${host%%/*}"
+# Only the authority decides where curl connects. Userinfo is refused
+# outright: "http://localhost:11434@evil.example" would otherwise pass the
+# check below and connect to evil.example. Loopback means exactly localhost,
+# a 127.x.y.z address, or ::1; "127.evil.example" is a hostname, not one.
+host="${url#*://}"; host="${host%%/*}"; host="${host%%\?*}"; host="${host%%#*}"
+[[ "$host" == *@* ]] && exit 1
 if [[ "$host" == \[* ]]; then host="${host#[}"; host="${host%%]*}"; else host="${host%%:*}"; fi
-case "$host" in
-  localhost|127.*|::1) ;;
-  *) [[ "$remote_ok" == "remote-ok" ]] || exit 1 ;;
-esac
+if [[ "$host" == localhost || "$host" == ::1 ]] || [[ "$host" =~ ^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then :
+else [[ "$remote_ok" == "remote-ok" ]] || exit 1; fi
 
 system="You are Omabuddy, a tiny desktop companion living in the corner of a developer's Linux screen. \
 Reply with ONE short line, under 90 characters, no quotes, no emoji, no preamble. \
