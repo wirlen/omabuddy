@@ -150,8 +150,16 @@ to follow.
   (localhost, 127.x, or ::1) unless you also set `allowRemoteLlm` to `true`.
   That guard lives in the script itself, so a stray process flipping the
   setting over IPC can't quietly turn the buddy into a beacon.
-- The probe gives up after 15 seconds, so a stalled network mount under your
-  terminal can't wedge it.
+- The probe gives up after 15 seconds (its whole process group is killed 2
+  seconds after that), so a stalled network mount under your terminal can't
+  wedge it.
+- The probe is bounded in bytes, not just time. Every name, branch and event
+  title is clipped to 128 characters, git listings are counted for at most
+  20,000 lines, each JSON document it parses (window list, calendar feed) is
+  cut off at 1 MiB, each agent usage record at 64 KiB and at most 16 records,
+  files are read without following symlinks, and a snapshot over 16 KiB is
+  refused by the probe and dropped again by the panel. A hostile repo or an
+  oversized record costs a bounded read, never a large allocation.
 - Every line it shows is rendered as plain text, never markup.
 - These are rules, not accidents. [CONTRIBUTING.md](CONTRIBUTING.md) spells
   out what a change may read and send, and how to report a vulnerability.

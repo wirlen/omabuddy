@@ -3,11 +3,43 @@
 # buddy lives in: the focused terminal's working directory and its git
 # state, battery, CPU load, and the hour. Runs every few seconds from the
 # panel, so it stays cheap and never blocks on anything.
+#
+# Everything it reads is untrusted and everything it reads is bounded. Each
+# string it keeps is clipped, each file and tool output it parses is cut off
+# producer-side at max+1 bytes and thrown away if it reaches that, and the
+# final snapshot is refused rather than printed if it grows past out_max.
+# Time is bounded by the panel (timeout -k 2 15); bytes are bounded here.
 set -u
 
-pid="$(hyprctl activewindow -j 2>/dev/null | jq -r '.pid // empty')"
+# Stderr goes back to the panel, which keeps it in memory: cap it too.
+exec 2> >(head -c 4096 >&2)
+
+str_max=128        # chars kept of any name, branch or title
+json_max=1048576   # bytes of any single JSON document parsed (hyprctl, feeds)
+record_max=65536   # bytes of one agent usage record
+records_max=16     # agent usage records looked at
+lines_max=20000    # git output lines counted before we stop caring
+out_max=16384      # bytes of the snapshot itself
+
+clip() { printf '%s' "${1:0:${2:-$str_max}}"; }
+# Bounded, no-follow read of a file we did not write: refuses symlinks and
+# anything that is not a regular file, then emits at most max+1 bytes so a
+# file that grows under us still cannot exceed the cap. Callers treat a
+# document cut at max+1 as unparseable, which jq guarantees for objects.
+read_capped() {
+  local f="$1" max="$2" size
+  [[ -f "$f" && ! -L "$f" && -r "$f" ]] || return 1
+  size="$(stat -c %s -- "$f" 2>/dev/null)" || return 1
+  (( size <= max )) || return 1
+  head -c "$((max + 1))" -- "$f"
+}
+# Same cap on a tool's stdout: nothing past max+1 bytes is ever buffered.
+run_capped() { local max="$1"; shift; "$@" 2>/dev/null | head -c "$((max + 1))"; }
+
+pid="$(run_capped "$json_max" hyprctl activewindow -j | jq -r '.pid // empty' 2>/dev/null)"
+pid="$(clip "$pid" 16)"
 cwd=""
-if [[ -n "${pid:-}" ]]; then
+if [[ "$pid" =~ ^[0-9]+$ ]]; then
   # Walk to the deepest descendant: a terminal spawns a shell which spawns
   # whatever you're running, and that one has the cwd you actually care about.
   cur="$pid"
@@ -27,58 +59,77 @@ fi
 # hooks, pagers, signatures, or external tools.
 g() { git -c core.fsmonitor=false -c core.pager=cat -c diff.external= -c log.showSignature=false "$@"; }
 
+# Only counts and clipped names are kept. The diff and ls-files listings are
+# streamed through head so a repo with a million files costs a bounded read
+# and never a buffered one; the counts saturate at lines_max, which is
+# already "a lot" as far as a mood is concerned. Paths are bounded by the
+# kernel (PATH_MAX); a hostile HEAD file can be any length, so branch is
+# clipped.
 in_repo=false branch="" dirty=0 untracked=0 ahead=0 last_commit=0 repo=""
-if [[ -n "$cwd" ]] && top="$(g -C "$cwd" rev-parse --show-toplevel 2>/dev/null)"; then
+if [[ -n "$cwd" ]] && top="$(g -C "$cwd" rev-parse --show-toplevel 2>/dev/null | head -c 4097)" && [[ -d "$top" ]]; then
   in_repo=true
-  repo="$(basename "$top")"
-  branch="$(g -C "$top" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
-  dirty="$(g -C "$top" diff --no-ext-diff --no-textconv --numstat HEAD 2>/dev/null | awk '{a+=$1; d+=$2} END {print a+d+0}')"
-  untracked="$(g -C "$top" ls-files --others --exclude-standard 2>/dev/null | wc -l)"
-  ahead="$(g -C "$top" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
-  last_commit="$(g -C "$top" log -1 --no-show-signature --format=%ct 2>/dev/null || echo 0)"
+  repo="$(clip "$(basename "$top")")"
+  branch="$(clip "$(g -C "$top" rev-parse --abbrev-ref HEAD 2>/dev/null | head -c "$((str_max * 4))")")"
+  dirty="$(g -C "$top" diff --no-ext-diff --no-textconv --numstat HEAD 2>/dev/null | head -n "$lines_max" | awk '{a+=$1; d+=$2} END {print a+d+0}')"
+  untracked="$(g -C "$top" ls-files --others --exclude-standard 2>/dev/null | head -n "$lines_max" | wc -l)"
+  ahead="$(g -C "$top" rev-list --count '@{u}..HEAD' 2>/dev/null | head -c 32 || echo 0)"
+  last_commit="$(g -C "$top" log -1 --no-show-signature --format=%ct 2>/dev/null | head -c 32 || echo 0)"
 fi
 
 battery=-1 charging=false
 for bat in /sys/class/power_supply/BAT*; do
   [[ -r "$bat/capacity" ]] || continue
-  battery="$(<"$bat/capacity")"
-  case "$(<"$bat/status")" in Charging|Full) charging=true ;; esac
+  battery="$(head -c 8 "$bat/capacity")"
+  case "$(head -c 16 "$bat/status")" in Charging|Full) charging=true ;; esac
   break
 done
 
 # Calendar: the OmaCal plugin's feed, if OmaCal is installed. Next event that
-# has not ended yet, minutes until it starts (negative while ongoing).
+# has not ended yet, minutes until it starts (negative while ongoing). Event
+# titles come from whoever sent the invite, so the title is clipped.
 cal_title="" cal_eta=0 cal_has=false
 feed="${XDG_STATE_HOME:-$HOME/.local/state}/omacal/upcoming.json"
-if [[ -r "$feed" ]]; then
-  cal_line="$(jq -r --argjson now "$(date +%s)" '
-    [.events[]? | select(.all_day != true) | select((.end_ms/1000) > $now)]
-    | sort_by(.start_ms) | .[0] // empty
-    | "\(.title)\t\(((.start_ms/1000) - $now) / 60 | floor)"' "$feed" 2>/dev/null)"
-  if [[ -n "$cal_line" ]]; then
-    cal_has=true
-    cal_title="${cal_line%%$'\t'*}"
-    cal_eta="${cal_line##*$'\t'}"
-  fi
+cal_line="$(read_capped "$feed" "$json_max" | jq -r --argjson now "$(date +%s)" --argjson n "$str_max" '
+  [.events[]? | select(.all_day != true) | select((.end_ms/1000) > $now)]
+  | sort_by(.start_ms) | .[0] // empty
+  | "\(.title | tostring | .[:$n])\t\(((.start_ms/1000) - $now) / 60 | floor)"' 2>/dev/null | head -c "$((str_max * 4 + 32))")"
+if [[ -n "$cal_line" ]]; then
+  cal_has=true
+  cal_title="${cal_line%%$'\t'*}"
+  cal_eta="${cal_line##*$'\t'}"
 fi
 
 # Agents: Omarchy keeps one usage record per coding agent (Claude Code,
-# Codex, ...). Take the busiest ready one plus its tightest rate limit.
+# Codex, ...). Take the busiest ready one plus its tightest rate limit. At
+# most records_max records of record_max bytes each are read; a record that
+# is larger, a symlink, or not a regular file is skipped, and the list that
+# reaches the panel is at most eight entries of clipped strings and numbers.
 agents_json="[]"
 usage_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/agents/usage"
 if [[ -d "$usage_dir" ]]; then
-  agents_json="$(jq -cs '[ .[] | select(.ready == true)
-    | {id, name, prompts: (.todayPrompts // 0), sessions: (.todaySessions // 0),
-       limit: ([.limits[]?.percent] | max // 0),
-       limitLabel: ((.limits // []) | max_by(.percent) | .label // "")} ]' "$usage_dir"/*.json 2>/dev/null || echo "[]")"
+  agents_json="$(
+    n=0
+    for f in "$usage_dir"/*.json; do
+      (( n++ >= records_max )) && break
+      read_capped "$f" "$record_max" && echo
+    done | jq -cs --argjson n "$str_max" '[ .[] | objects | select(.ready == true)
+      | {id: (.id | tostring | .[:$n]), name: (.name | tostring | .[:$n]),
+         prompts: ((.todayPrompts | numbers) // 0), sessions: ((.todaySessions | numbers) // 0),
+         limit: ([.limits[]?.percent | numbers] | max // 0),
+         limitLabel: (([.limits[]? | select(.percent | numbers)] | max_by(.percent) | .label // "") | tostring | .[:$n])}
+      ] | .[:8]' 2>/dev/null | head -c "$out_max")"
+  [[ "$agents_json" == \[* ]] || agents_json="[]"
 fi
 # Live agent windows: Omarchy gives them one class. Claude Code and friends
 # put a spinner glyph in the title while they work, so count those as busy.
-agent_windows=0 agent_busy=0
-windows="$(hyprctl clients -j 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
-if wins="$(hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.class == "org.omarchy.agent") | .title')"; then
-  agent_windows="$(printf '%s\n' "$wins" | grep -c . || true)"
-  agent_busy="$(printf '%s\n' "$wins" | grep -cE '^[◐◑◒◓✳✻✽✶✢⏺]' || true)"
+# The window list is parsed once, under the same byte cap as every other
+# document, and only two counts leave jq.
+agent_windows=0 agent_busy=0 windows=0
+counts="$(run_capped "$json_max" hyprctl clients -j | jq -r '
+  [.[] | select(.class == "org.omarchy.agent") | .title | tostring] as $t
+  | "\(length)\t\($t | length)\t\([$t[] | select(test("^[◐◑◒◓✳✻✽✶✢⏺]"))] | length)"' 2>/dev/null | head -c 64)"
+if [[ "$counts" =~ ^([0-9]+)$'\t'([0-9]+)$'\t'([0-9]+)$ ]]; then
+  windows="${BASH_REMATCH[1]}" agent_windows="${BASH_REMATCH[2]}" agent_busy="${BASH_REMATCH[3]}"
 fi
 
 read -r load1 _ < /proc/loadavg
@@ -90,17 +141,21 @@ num() { [[ "$1" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] && printf '%s' "$1" || printf '%s' "
 battery="$(num "$battery" -1)"; cal_eta="$(num "$cal_eta" 0)"; load1="$(num "$load1" 0)"
 dirty="$(num "$dirty" 0)"; untracked="$(num "$untracked" 0)"; ahead="$(num "$ahead" 0)"
 last_commit="$(num "$last_commit" 0)"; cores="$(num "$cores" 1)"; hour="$(num "$hour" 12)"
+windows="$(num "$windows" 0)"; agent_windows="$(num "$agent_windows" 0)"; agent_busy="$(num "$agent_busy" 0)"
 
-jq -cn \
+out="$(jq -cn \
   --arg cwd "$cwd" --arg repo "$repo" --arg branch "$branch" \
-  --argjson inRepo "$in_repo" --argjson dirty "${dirty:-0}" --argjson untracked "${untracked:-0}" \
-  --argjson ahead "${ahead:-0}" --argjson lastCommit "${last_commit:-0}" \
+  --argjson inRepo "$in_repo" --argjson dirty "$dirty" --argjson untracked "$untracked" \
+  --argjson ahead "$ahead" --argjson lastCommit "$last_commit" \
   --argjson battery "$battery" --argjson charging "$charging" \
   --argjson load "$load1" --argjson cores "$cores" --argjson hour "$hour" \
-  --argjson calHas "$cal_has" --arg calTitle "$cal_title" --argjson calEta "${cal_eta:-0}" \
-  --argjson agents "$agents_json" --argjson agentWindows "${agent_windows:-0}" --argjson agentBusy "${agent_busy:-0}" --argjson windows "${windows:-0}" \
+  --argjson calHas "$cal_has" --arg calTitle "$cal_title" --argjson calEta "$cal_eta" \
+  --argjson agents "$agents_json" --argjson agentWindows "$agent_windows" --argjson agentBusy "$agent_busy" --argjson windows "$windows" \
   '{cwd:$cwd, repo:$repo, branch:$branch, inRepo:$inRepo, dirty:$dirty, untracked:$untracked,
     ahead:$ahead, lastCommit:$lastCommit, battery:$battery, charging:$charging,
     load:$load, cores:$cores, hour:$hour, now:(now|floor),
     calendar:{has:$calHas, title:$calTitle, eta:$calEta},
-    agents:$agents, agentWindows:$agentWindows, agentBusy:$agentBusy, windows:$windows}'
+    agents:$agents, agentWindows:$agentWindows, agentBusy:$agentBusy, windows:$windows}')" || exit 1
+# The panel refuses anything over out_max as well; this is the producer side.
+(( $(printf '%s' "$out" | wc -c) <= out_max )) || { echo "omabuddy probe: snapshot over $out_max bytes, dropped" >&2; exit 1; }
+printf '%s\n' "$out"

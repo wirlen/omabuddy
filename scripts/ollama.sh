@@ -49,5 +49,6 @@ curl -sS -m 12 --max-filesize "$((max_bytes + 1))" -X POST "$url/api/generate" \
   | head -c "$((max_bytes + 1))" > "$body"
 size="$(stat -c %s "$body" 2>/dev/null)" || exit 1
 (( size > max_bytes )) && exit 1
+# bounded: the body file is refused above once it reaches max+1 bytes.
 jq -r '.response // empty' "$body" 2>/dev/null \
   | head -n1 | sed -e 's/^["“”'"'"' ]*//' -e 's/["“”'"'"' ]*$//' | cut -c1-120

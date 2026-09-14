@@ -213,20 +213,31 @@ Item {
   // --------------------------------------------------------------- sensors
   Process {
     id: probe
-    // A stalled mount under the focused directory must not wedge the probe for good.
-    command: ["timeout", "15", root.scriptsDir + "/probe.sh"]
+    // A stalled mount under the focused directory must not wedge the probe for
+    // good: timeout signals the probe's whole process group at 15 s and
+    // SIGKILLs whatever is still there 2 s later. Bytes are bounded too: the
+    // probe clips every input and refuses to print a snapshot over
+    // probeMaxBytes, and this side drops anything larger unparsed, so a
+    // collector that buffers to end-of-stream never holds more than that.
+    property int probeMaxBytes: 16384
+    command: ["timeout", "-k", "2", "15", root.scriptsDir + "/probe.sh"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (text.length > probe.probeMaxBytes) { console.warn("omabuddy: probe output over", probe.probeMaxBytes, "bytes, dropped"); return }
         let next
         try { next = JSON.parse(text) } catch (e) { console.warn("omabuddy: probe output unreadable:", e); return }
+        if (!next || typeof next !== "object" || Array.isArray(next)) { console.warn("omabuddy: probe output is not a snapshot"); return }
         const fired = Mood.events(root.sensors, next)
         root.sensors = next
         root.recompute()
         for (let i = 0; i < fired.length; i++) { root.forceMood(fired[i], 8000); root.speak(fired[i], false) }
       }
     }
-    stderr: StdioCollector { waitForEnd: true; onStreamFinished: if (text.trim()) console.warn("omabuddy probe:", text.trim()) }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim()) console.warn("omabuddy probe:", text.slice(0, 4096).trim())
+    }
   }
   Timer {
     interval: root.probeSeconds * 1000

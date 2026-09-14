@@ -35,9 +35,14 @@ These rules apply to every change, however small:
 - **Parse URLs like an attacker wrote them.** The loopback check in
   `scripts/ollama.sh` refuses userinfo (`localhost@evil`) and matches only
   `localhost`, `127.x.y.z` and `::1`, never a prefix. Keep it that strict.
-- **Bound every remote response.** Anything read from a network endpoint
-  is capped in bytes before it is parsed (see `scripts/ollama.sh`: 64 KiB,
-  rejected at max+1, before jq sees it). A time limit alone is not a cap.
+- **Bound every input in bytes.** Anything read from a network endpoint, a
+  file, or a tool's output is capped producer-side before it is parsed and
+  rejected at max+1 (see `scripts/ollama.sh`: 64 KiB; `scripts/probe.sh`:
+  `read_capped`, `run_capped`, `clip`, and `out_max`). Strings that reach the
+  panel are clipped, lists are capped in length, files are opened without
+  following symlinks, and the panel drops any snapshot over its own cap
+  again. A time limit alone is not a cap. Run `.claude/skills/bounded-inputs/audit.sh`
+  before pushing; it fails on the patterns a marketplace reviewer flags.
 - **No new daemons, no new packages, no network listeners.** If a feature
   needs one, it probably belongs in a separate project the plugin can talk to.
 - **No secrets in settings.** Settings live in `shell.json` in plain text.
