@@ -134,10 +134,12 @@ to follow.
 ## Privacy and safety
 
 - Everything runs as your user inside `omarchy-shell`, like every Omarchy plugin.
-- The probe only reads: your focused terminal's working directory, git state
-  there, battery and load from sysfs, the OmaCal feed, and Omarchy's agent
-  usage records. It runs git with hooks-free, config-safe flags so a freshly
-  cloned repo cannot run code through its own `.git/config`.
+- The probe only reads: the focused window's process tree under `/proc` (to
+  find your terminal's working directory), git state there, Hyprland's window
+  list (the count, plus the titles of agent windows to spot a spinner),
+  battery and load from sysfs, the OmaCal feed, and Omarchy's agent usage
+  records. It runs git with hooks-free, config-safe flags so a freshly cloned
+  repo cannot run code through its own `.git/config`.
 - Nothing leaves the machine unless you set `llm` to `ollama`. Then each quip
   request posts a small JSON context to `ollamaUrl`. Exactly these fields:
   repo name (not the path), branch, count of uncommitted changed lines, hour

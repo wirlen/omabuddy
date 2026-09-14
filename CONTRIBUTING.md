@@ -26,10 +26,12 @@ These rules apply to every change, however small:
   all untrusted. Build JSON with `jq --arg`, render text as plain text, and
   never pass any of it to a shell unquoted.
 - **Run tools defensively.** Git runs with every repo-config command hook it
-  could reach switched off: fsmonitor, external diff, textconv, and signature
-  verification via gpg.program (see `scripts/probe.sh`). Any new git call or
-  external tool needs the same thinking: what can a hostile directory make it
-  do?
+  could reach switched off: `core.fsmonitor`, the pager and `diff.external`
+  in the `g()` wrapper, plus `--no-ext-diff --no-textconv` on the diff call
+  and `log.showSignature=false --no-show-signature` on the log call so
+  `gpg.program` is never invoked (see `scripts/probe.sh`). Any new git call
+  or external tool needs the same thinking: what can a hostile directory make
+  it do?
 - **Parse URLs like an attacker wrote them.** The loopback check in
   `scripts/ollama.sh` refuses userinfo (`localhost@evil`) and matches only
   `localhost`, `127.x.y.z` and `::1`, never a prefix. Keep it that strict.
