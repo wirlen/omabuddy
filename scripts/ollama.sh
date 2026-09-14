@@ -31,6 +31,20 @@ Say one line to them."
 payload="$(jq -cn --arg m "$model" --arg s "$system" --arg p "$prompt" \
   '{model:$m, system:$s, prompt:$p, stream:false, options:{temperature:0.9, num_predict:40}}')"
 
-curl -sS -m 12 -X POST "$url/api/generate" -H 'Content-Type: application/json' -d "$payload" 2>/dev/null \
-  | jq -r '.response // empty' \
+# A remote or compromised endpoint must not be able to make jq buffer an
+# unbounded document. One line of reply never needs more than 64 KiB, so
+# the body is cut off producer-side at max+1 bytes (head closes the pipe and
+# curl dies on SIGPIPE) and anything that reaches max+1 is thrown away
+# unparsed. This covers error and redirect bodies too: redirects are not
+# followed, and the cap sits on whatever curl emits. curl stops on its own at
+# the same boundary (--max-filesize), so head is the guard if curl is older.
+max_bytes=65536
+body="$(mktemp)" || exit 1
+trap 'rm -f "$body"' EXIT
+curl -sS -m 12 --max-filesize "$((max_bytes + 1))" -X POST "$url/api/generate" \
+  -H 'Content-Type: application/json' -d "$payload" 2>/dev/null \
+  | head -c "$((max_bytes + 1))" > "$body"
+size="$(stat -c %s "$body" 2>/dev/null)" || exit 1
+(( size > max_bytes )) && exit 1
+jq -r '.response // empty' "$body" 2>/dev/null \
   | head -n1 | sed -e 's/^["“”'"'"' ]*//' -e 's/["“”'"'"' ]*$//' | cut -c1-120

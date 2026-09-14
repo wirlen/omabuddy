@@ -28,6 +28,9 @@ These rules apply to every change, however small:
 - **Run tools defensively.** Git runs with repo-config command hooks disabled
   (see `scripts/probe.sh`). Any new external tool needs the same thinking:
   what can a hostile directory make it do?
+- **Bound every remote response.** Anything read from a network endpoint
+  is capped in bytes before it is parsed (see `scripts/ollama.sh`: 64 KiB,
+  rejected at max+1, before jq sees it). A time limit alone is not a cap.
 - **No new daemons, no new packages, no network listeners.** If a feature
   needs one, it probably belongs in a separate project the plugin can talk to.
 - **No secrets in settings.** Settings live in `shell.json` in plain text.
