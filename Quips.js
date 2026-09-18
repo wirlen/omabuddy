@@ -2,7 +2,8 @@
 // `polite`. Keep lines short (one line, under ~90 chars), lowercase like the
 // design, and in the voice of a small creature who lives in a screen corner.
 // Tokens: {repo} {branch} {dirty} {hour} {streak} {battery} {event} {eta}
-// {agent} {prompts} {limit} {windows}.
+// {agent} {prompts} {limit} {windows} {untracked} {subject} {fixes} {commits}
+// {pushes} {days} {time}.
 .pragma library
 
 var lines = {
@@ -165,6 +166,123 @@ var lines = {
   greeting: {
     snarky: ["hi. i live here now.", "reporting for duty. duty being: standing here.", "oh, hello. i'll be in the corner."],
     polite: ["hello! i'll be in the corner.", "morning. or whatever this is."]
+  },
+  welcomeBack: {
+    snarky: [
+      "oh, you're back. i didn't move. i never move.",
+      "welcome back. nothing happened. i checked.",
+      "you left. i counted the pixels. all still here."
+    ],
+    polite: ["welcome back.", "hi again. fresh start on the streak."]
+  },
+  overwhelmed: {
+    snarky: [
+      "{windows} windows. this is a cry for help.",
+      "{windows} windows open. i can't see the wallpaper anymore.",
+      "close one. any one. as a treat."
+    ],
+    polite: ["{windows} windows open — a quick tidy might help.", "that's a lot of windows. want to close a few?"]
+  },
+  cluttered: {
+    snarky: [
+      "{untracked} untracked files. are these... yours?",
+      "{untracked} files git has never heard of. a .gitignore would love to meet them.",
+      "your repo has a junk drawer. it has {untracked} things in it."
+    ],
+    polite: ["{untracked} untracked files in {repo} — add or ignore them?", "a few strays in the working tree."]
+  },
+  daring: {
+    snarky: [
+      "editing straight on {branch}. living dangerously.",
+      "{dirty} lines on {branch}, no branch, no net. respect. also, fear.",
+      "git checkout -b costs nothing. just saying."
+    ],
+    polite: ["you're working directly on {branch} — a feature branch might be safer.", "uncommitted changes on {branch}. careful."]
+  },
+  grumpy: {
+    snarky: [
+      "okay. that's enough. i'm not talking to you for a bit.",
+      "five pokes. FIVE. i have a face, not a button.",
+      "i'm going to stare at the wall now. don't follow."
+    ],
+    polite: ["that's a lot of poking. i need a minute.", "i'll be quiet for a bit."]
+  },
+  ignoring: { snarky: [""], polite: [""] },
+  fixStreak: {
+    snarky: [
+      "{fixes} fixes in a row. is the bug winning?",
+      "fix. fix. fix. fix. fix. that's a poem now.",
+      "the {fixes}th fix. bold of you to keep numbering them."
+    ],
+    polite: ["{fixes} fix commits in a row — maybe step back for a minute?", "another fix. you'll get it."]
+  },
+  wipCommit: {
+    snarky: [
+      "\"wip\". a commit message and a confession.",
+      "wip. the history will thank you. it won't.",
+      "committed \"wip\". future you is already annoyed."
+    ],
+    polite: ["a wip commit — remember to squash it later.", "saved. you can tidy the message later."]
+  },
+  longSubject: {
+    snarky: [
+      "that subject line has a subject line.",
+      "a paragraph for a subject. the body is right there, you know.",
+      "seventy-two characters is a suggestion. you took it as a dare."
+    ],
+    polite: ["long subject — the details can go in the body.", "committed. a shorter subject reads nicer in the log."]
+  },
+  emojiCommit: {
+    snarky: [
+      "{subject}. very expressive. means nothing.",
+      "an emoji commit. git blame is going to be fun.",
+      "i am made of block characters and even i want words."
+    ],
+    polite: ["committed with {subject} — a word or two would help later.", "nice emoji. maybe a word too?"]
+  },
+  lateShip: {
+    snarky: [
+      "pushing at {time}? bold.",
+      "a {time} push. nothing has ever gone wrong at this hour.",
+      "shipped at {time}. sleep now. ci can panic without you."
+    ],
+    polite: ["pushed at {time}. good night.", "late push, done. rest."]
+  },
+  plugged: {
+    snarky: ["nom nom nom.", "ah. electrons. finally.", "plugged in. the dramatic phase is over."],
+    polite: ["charging. thank you.", "plugged in."]
+  },
+  full: {
+    snarky: ["100%. i'm full. unplug me before i get smug.", "topped up. i could run a marathon. i won't.", "battery full. peak me."],
+    polite: ["battery is full.", "fully charged."]
+  },
+  unplugged: {
+    snarky: ["...you unplugged me. okay. it's fine. {battery}%. fine.", "on battery now. i'm not nervous. you're nervous.", "free-range mode. {battery}%."],
+    polite: ["running on battery, {battery}%.", "unplugged. keep an eye on the battery."]
+  },
+  monday: {
+    snarky: ["monday. we don't have to talk about it.", "it's monday. coffee is a load-bearing wall.", "monday morning. start with something you can't break."],
+    polite: ["happy monday. ease in.", "monday morning. small steps first."]
+  },
+  friday: {
+    snarky: ["friday after four. don't you dare deploy.", "it's friday. the weekend is a merge away.", "friday afternoon: read-only mode, please."],
+    polite: ["friday afternoon. wrap up gently.", "nearly the weekend. nice work."]
+  },
+  birthday: {
+    snarky: ["it's my birthday. {days} days in this corner. no cake, i notice.", "one year older, same corner. a hat is the least you could do.", "happy birthday to me. i'd blow out a candle but i'm text."],
+    polite: ["it's my birthday! {days} days with you.", "a year in the corner. thanks for having me."]
+  },
+  firstPush: {
+    snarky: ["first push of the day. the remote missed you.", "one push down. confetti is mandatory.", "shipped something before {hour}:00. who are you?"],
+    polite: ["first push of the day. lovely.", "shipped! nice start."]
+  },
+  tenCommits: {
+    snarky: ["{commits} commits today. the log is a novel now.", "ten commits. history will remember. or squash.", "double digits. i'm making confetti out of your diff."],
+    polite: ["{commits} commits today — great pace.", "ten commits. excellent."]
+  },
+  calmWeek: {
+    snarky: ["a whole week without a battery panic. i'm oddly proud.", "seven calm days. suspicious. impressive. both.", "one week, zero meltdowns. from either of us."],
+    polite: ["a calm week — no low-battery scares.", "seven days without a panic. well done."]
   }
 }
 

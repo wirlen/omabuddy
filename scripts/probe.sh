@@ -65,7 +65,7 @@ g() { git -c core.fsmonitor=false -c core.pager=cat -c diff.external= -c log.sho
 # already "a lot" as far as a mood is concerned. Paths are bounded by the
 # kernel (PATH_MAX); a hostile HEAD file can be any length, so branch is
 # clipped.
-in_repo=false branch="" dirty=0 untracked=0 ahead=0 last_commit=0 repo=""
+in_repo=false branch="" dirty=0 untracked=0 ahead=0 last_commit=0 repo="" subject="" fix_streak=0
 if [[ -n "$cwd" ]] && top="$(g -C "$cwd" rev-parse --show-toplevel 2>/dev/null | head -c 4097)" && [[ -d "$top" ]]; then
   in_repo=true
   repo="$(clip "$(basename "$top")")"
@@ -74,6 +74,12 @@ if [[ -n "$cwd" ]] && top="$(g -C "$cwd" rev-parse --show-toplevel 2>/dev/null |
   untracked="$(g -C "$top" ls-files --others --exclude-standard 2>/dev/null | head -n "$lines_max" | wc -l)"
   ahead="$(g -C "$top" rev-list --count '@{u}..HEAD' 2>/dev/null | head -c 32 || echo 0)"
   last_commit="$(g -C "$top" log -1 --no-show-signature --format=%ct 2>/dev/null | head -c 32 || echo 0)"
+  # The commit subject is whatever the author typed, so it is clipped like a
+  # branch name. The streak is how many of the last eight subjects in a row
+  # start with "fix": eight lines of at most 512 bytes each are looked at.
+  subject="$(clip "$(g -C "$top" log -1 --no-show-signature --format=%s 2>/dev/null | head -c "$((str_max * 4))" | tr -d '\n')")"
+  fix_streak="$(g -C "$top" log -8 --no-show-signature --format=%s 2>/dev/null | head -n 8 | head -c 4096 \
+    | awk 'tolower($0) ~ /^(fix|fixes|fixed|fixup|hotfix)([^a-z]|$)/ {n++; next} {exit} END {print n+0}')"
 fi
 
 battery=-1 charging=false
@@ -135,25 +141,28 @@ fi
 read -r load1 _ < /proc/loadavg
 cores="$(nproc)"
 hour="$(date +%-H)"
+dow="$(date +%u)"   # 1 = Monday .. 7 = Sunday
 
 # Every --argjson below must be a number or the whole snapshot is lost.
 num() { [[ "$1" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] && printf '%s' "$1" || printf '%s' "$2"; }
 battery="$(num "$battery" -1)"; cal_eta="$(num "$cal_eta" 0)"; load1="$(num "$load1" 0)"
 dirty="$(num "$dirty" 0)"; untracked="$(num "$untracked" 0)"; ahead="$(num "$ahead" 0)"
-last_commit="$(num "$last_commit" 0)"; cores="$(num "$cores" 1)"; hour="$(num "$hour" 12)"
+last_commit="$(num "$last_commit" 0)"; cores="$(num "$cores" 1)"; hour="$(num "$hour" 12)"; dow="$(num "$dow" 1)"
+fix_streak="$(num "$fix_streak" 0)"
 windows="$(num "$windows" 0)"; agent_windows="$(num "$agent_windows" 0)"; agent_busy="$(num "$agent_busy" 0)"
 
 out="$(jq -cn \
-  --arg cwd "$cwd" --arg repo "$repo" --arg branch "$branch" \
+  --arg cwd "$cwd" --arg repo "$repo" --arg branch "$branch" --arg subject "$subject" --argjson fixStreak "$fix_streak" \
   --argjson inRepo "$in_repo" --argjson dirty "$dirty" --argjson untracked "$untracked" \
   --argjson ahead "$ahead" --argjson lastCommit "$last_commit" \
   --argjson battery "$battery" --argjson charging "$charging" \
-  --argjson load "$load1" --argjson cores "$cores" --argjson hour "$hour" \
+  --argjson load "$load1" --argjson cores "$cores" --argjson hour "$hour" --argjson dow "$dow" \
   --argjson calHas "$cal_has" --arg calTitle "$cal_title" --argjson calEta "$cal_eta" \
   --argjson agents "$agents_json" --argjson agentWindows "$agent_windows" --argjson agentBusy "$agent_busy" --argjson windows "$windows" \
   '{cwd:$cwd, repo:$repo, branch:$branch, inRepo:$inRepo, dirty:$dirty, untracked:$untracked,
-    ahead:$ahead, lastCommit:$lastCommit, battery:$battery, charging:$charging,
-    load:$load, cores:$cores, hour:$hour, now:(now|floor),
+    ahead:$ahead, lastCommit:$lastCommit, subject:$subject, fixStreak:$fixStreak,
+    battery:$battery, charging:$charging,
+    load:$load, cores:$cores, hour:$hour, dow:$dow, now:(now|floor),
     calendar:{has:$calHas, title:$calTitle, eta:$calEta},
     agents:$agents, agentWindows:$agentWindows, agentBusy:$agentBusy, windows:$windows}')" || exit 1
 # The panel refuses anything over out_max as well; this is the producer side.

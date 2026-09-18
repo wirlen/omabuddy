@@ -11,8 +11,20 @@ It notices:
 - **Your work streak.** Ninety minutes without a break and it starts nagging you to stand up.
 - **Git.** It follows the working directory of your focused terminal. A big
   uncommitted diff makes it worry, a commit makes it proud, a push makes it
-  cheer.
-- **Your machine.** Pegged CPUs make it sweat, a low battery makes it panic.
+  cheer. It reads your commit subjects too: five fixes in a row, a bare
+  "wip", a subject over 72 characters or one made only of emoji all get a
+  look. Forty untracked files or twenty dirty lines straight on `main` earn a
+  comment.
+- **Your machine.** Pegged CPUs make it sweat, a low battery makes it panic,
+  twenty open windows overwhelm it. Plugging in is dinner, a full battery is
+  a happy sigh, unplugging is a nervous glance.
+- **The calendar.** Monday mornings and Friday afternoons have their own
+  lines, a push after eleven at night gets called bold, and it wears a hat
+  on Halloween, New Year's Day and its own birthday (the day you installed it).
+- **You leaving.** Half an hour away, or a suspend, and it greets you when you
+  are back and starts the work streak fresh.
+- **Achievements.** First push of the day, ten commits in a day, and a week
+  without a battery panic each get a block-character confetti burst.
 - **Your calendar.** If [OmaCal](https://github.com/omacal) is installed it reads
   the same feed as the OmaCal bar widget and warns you ten minutes before a meeting.
 - **Your coding agents.** Omarchy already tracks Claude Code, Codex, and
@@ -39,7 +51,7 @@ omarchy restart shell
 
 | Do this | It does |
 | --- | --- |
-| Click it | Pokes it. It says something. |
+| Click it | Pokes it. It says something. Five pokes in a minute and it sulks for 45 seconds. |
 | Drag it | Moves it. It snaps to the nearest corner and remembers. |
 | Scroll on it | Grows or shrinks it. The size is remembered. |
 | Right-click it | Mutes or unmutes the speech bubble. |
@@ -50,6 +62,7 @@ From a terminal or a script:
 omarchy-shell omabuddy say "build is green"
 omarchy-shell omabuddy poke
 omarchy-shell omabuddy mood proud       # any mood name from Mood.js, for 20 seconds
+omarchy-shell omabuddy celebrate tenCommits   # confetti plus that achievement's line
 omarchy-shell omabuddy state            # JSON of mood, streak, and sensors
 omarchy-shell omabuddy set <key> <value>   # e.g. set size 18, set tone polite
 ```
@@ -74,6 +87,8 @@ entry in `~/.config/omarchy/shell.json`. Changes apply immediately.
 | `ollamaModel` | `llama3.2` | Any model you have pulled |
 | `allowRemoteLlm` | `false` | Ollama URLs are limited to this machine unless this is `true` |
 | `probeSeconds` | `20` | How often it looks at git, battery, and load |
+| `installedOn` | set on first run | `YYYY-MM-DD`; the buddy's birthday |
+| `stats` | written by the buddy | Today's commit and push counts and the last battery panic, for achievements |
 
 Example entry:
 
@@ -84,15 +99,21 @@ Example entry:
 ## Moods
 
 `idle`, `sleepy`, `hyped`, `stretch`, `worried`, `proud`, `shipped`, `sweaty`,
-`panic`, `zen`, `meeting`, `rationed`, `cooking`, `agentDone`, `poked`, `greeting`. The rules live in `Mood.js`; the face for
-each mood is a handful of numbers in the same file.
+`panic`, `zen`, `meeting`, `rationed`, `cooking`, `agentDone`, `poked`, `greeting`,
+`welcomeBack`, `overwhelmed`, `cluttered`, `daring`, `grumpy`, `ignoring`,
+`fixStreak`, `wipCommit`, `longSubject`, `emojiCommit`, `lateShip`, `plugged`,
+`full`, `unplugged`, `monday`, `friday`, `birthday`, `firstPush`, `tenCommits`,
+`calmWeek`. The rules live in `Mood.js`; the face for
+each mood is a handful of numbers in the same file, and the costume for the
+day is `Mood.costume()`.
 
 ## Contributing lines
 
 Open `Quips.js`, find the mood, add a line. Keep it short, kind, and in the
 voice of a small creature who lives in a screen corner. Tokens `{repo}`,
-`{branch}`, `{dirty}`, `{hour}`, `{streak}`, `{battery}`, `{event}`, `{eta}`,
-`{agent}`, `{prompts}` and `{limit}` are filled in.
+`{branch}`, `{dirty}`, `{hour}`, `{time}`, `{streak}`, `{battery}`, `{event}`, `{eta}`,
+`{agent}`, `{prompts}`, `{limit}`, `{windows}`, `{untracked}`, `{subject}`,
+`{fixes}`, `{commits}`, `{pushes}` and `{days}` are filled in.
 
 ## How it works
 
@@ -117,8 +138,9 @@ order of how likely they are to happen:
   real one is on its way.
 - **Music.** Notice what's playing over MPRIS and comment on it. Repeat plays,
   questionable taste, and silence at 3 pm are all fair game.
-- **Build and test results.** The design has a "judging" face for a red build.
-  A `say` hook from your test runner or CI would light it up.
+- **Build and test results.** The judging face it pulls for a "wip" commit
+  would suit a red build too. A `say` hook from your test runner or CI would
+  light it up.
 - **Notifications and system events.** Updates pending, disk nearly full,
   the theme changing under it.
 - **More faces and voices.** Extra moods, a per-theme colour override, and
@@ -135,17 +157,22 @@ to follow.
 
 - Everything runs as your user inside `omarchy-shell`, like every Omarchy plugin.
 - The probe only reads: the focused window's process tree under `/proc` (to
-  find your terminal's working directory), git state there, Hyprland's window
+  find your terminal's working directory), git state there (branch, change
+  counts, the last commit's time and subject line, and how many of the last
+  eight subjects start with "fix"), Hyprland's window
   list (the count, plus the titles of agent windows to spot a spinner),
-  battery and load from sysfs, the OmaCal feed, and Omarchy's agent usage
+  battery and load from sysfs, the clock, the OmaCal feed, and Omarchy's agent usage
   records. It runs git with hooks-free, config-safe flags so a freshly cloned
   repo cannot run code through its own `.git/config`.
 - Nothing leaves the machine unless you set `llm` to `ollama`. Then each quip
   request posts a small JSON context to `ollamaUrl`. Exactly these fields:
-  repo name (not the path), branch, count of uncommitted changed lines, hour
-  of day, minutes of your current work streak, battery percent, number of
-  open windows, next calendar event title and minutes until it, the busiest
-  agent's name and prompt count, and the highest agent limit percentage.
+  repo name (not the path), branch, count of uncommitted changed lines, count
+  of untracked files, the last commit's subject line, the fix-streak count,
+  hour of day, day of week, the time as HH:MM, minutes of your current work
+  streak, battery percent, number of open windows, next calendar event title
+  and minutes until it, the busiest agent's name and prompt count, the highest
+  agent limit percentage, and today's commit and push counts and days since
+  install from the buddy's own bookkeeping.
 - The URL must be `http` or `https` and must point at this machine
   (localhost, 127.x, or ::1) unless you also set `allowRemoteLlm` to `true`.
   That guard lives in the script itself, so a stray process flipping the
@@ -153,14 +180,19 @@ to follow.
 - The probe gives up after 15 seconds (its whole process group is killed 2
   seconds after that), so a stalled network mount under your terminal can't
   wedge it.
-- The probe is bounded in bytes, not just time. Every name, branch and event
-  title is clipped to 128 characters, git listings are counted for at most
+- The probe is bounded in bytes, not just time. Every name, branch, commit
+  subject and event title is clipped to 128 characters, the fix-streak count
+  looks at eight subject lines within 4 KiB, git listings are counted for at most
   20,000 lines, each JSON document it parses (window list, calendar feed) is
   cut off at 1 MiB, each agent usage record at 64 KiB and at most 16 records,
   files are read without following symlinks, and a snapshot over 16 KiB is
   refused by the probe and dropped again by the panel. A hostile repo or an
   oversized record costs a bounded read, never a large allocation.
-- Every line it shows is rendered as plain text, never markup.
+- Every line it shows is rendered as plain text, never markup. That includes
+  a commit subject quoted back at you.
+- The only things it writes are two keys in its own `shell.json` entry:
+  `installedOn` and the `stats` counters. It reads them back as untrusted
+  data like everything else.
 - These are rules, not accidents. [CONTRIBUTING.md](CONTRIBUTING.md) spells
   out what a change may read and send, and how to report a vulnerability.
 

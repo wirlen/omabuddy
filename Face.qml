@@ -12,6 +12,7 @@ Item {
   property string eyes: "◉    ◉"
   property string mouth: "▁▁"
   property string extra: ""
+  property string hat: ""        // costume line drawn above the head, "" for none
   property color color: Color.accent
   property int bob: 1800        // bounce period ms, 0 = still
   property bool talking: false
@@ -20,8 +21,8 @@ Item {
   implicitWidth: label.implicitWidth + pixelSize * 2
   implicitHeight: label.implicitHeight + pixelSize * 0.9
 
-  function art(eyes, mouth, extra) {
-    return "   ▄▄▄▄▄▄▄▄\n  █ " + eyes + " █" + (extra || "") + "\n  █        █\n  █   " + mouth + "   █\n   ▀▀▀▀▀▀▀▀\n    ▀▀  ▀▀"
+  function art(eyes, mouth, extra, hat) {
+    return (hat ? hat + "\n" : "") + "   ▄▄▄▄▄▄▄▄\n  █ " + eyes + " █" + (extra || "") + "\n  █        █\n  █   " + mouth + "   █\n   ▀▀▀▀▀▀▀▀\n    ▀▀  ▀▀"
   }
 
   // Blink: eyes flatten for a beat every few seconds.
@@ -43,7 +44,40 @@ Item {
 
   readonly property string shownEyes: blinking ? "–    –" : eyes
   readonly property string shownMouth: mouthOpen ? "○ " : mouth
-  readonly property string text: art(shownEyes, shownMouth, extra)
+  readonly property string text: art(shownEyes, shownMouth, extra, hat)
+
+  // Confetti: a handful of block glyphs burst from the head and fade. The
+  // parent calls celebrate(); nothing here persists.
+  function celebrate() { confetti.model = 0; confetti.model = 10 }
+  Repeater {
+    id: confetti
+    model: 0
+    delegate: Text {
+      id: bit
+      readonly property real angle: (index / confetti.count) * Math.PI * 2 + Math.random() * 0.5
+      readonly property real reach: face.pixelSize * (3 + Math.random() * 3)
+      text: ["✦", "✧", "▪", "▫", "·", "*"][index % 6]
+      color: index % 3 === 0 ? face.color : Color.foreground
+      font.family: Style.font.family
+      font.pixelSize: face.pixelSize * 0.9
+      font.weight: Font.Bold
+      textFormat: Text.PlainText
+      x: label.x + label.width / 2
+      y: label.y + face.pixelSize
+      opacity: 0
+      Component.onCompleted: burst.start()
+      ParallelAnimation {
+        id: burst
+        NumberAnimation { target: bit; property: "x"; to: bit.x + Math.cos(bit.angle) * bit.reach; duration: 900; easing.type: Easing.OutCubic }
+        NumberAnimation { target: bit; property: "y"; to: bit.y + Math.sin(bit.angle) * bit.reach * 0.7 - face.pixelSize; duration: 900; easing.type: Easing.OutCubic }
+        SequentialAnimation {
+          NumberAnimation { target: bit; property: "opacity"; to: 1; duration: 80 }
+          PauseAnimation { duration: 500 }
+          NumberAnimation { target: bit; property: "opacity"; to: 0; duration: 400 }
+        }
+      }
+    }
+  }
 
   Behavior on color { ColorAnimation { duration: 400 } }
 

@@ -14,6 +14,7 @@
 //   omarchy-shell omabuddy say "hello"     make it say something
 //   omarchy-shell omabuddy mood proud      force a mood for a while
 //   omarchy-shell omabuddy poke
+//   omarchy-shell omabuddy celebrate firstPush  confetti, for testing
 //   omarchy-shell omabuddy set tone polite (see README for settings)
 //   omarchy-shell omabuddy state
 
@@ -57,6 +58,7 @@ Item {
       const parsed = JSON.parse(String(raw || "").trim() || "{}")
       root.shellConfig = parsed && typeof parsed === "object" ? parsed : null
     } catch (e) { root.shellConfig = null }
+    root.writtenEntry = null
   }
   readonly property var pluginEntry: {
     const config = root.shellConfig || (shell ? shell.shellConfig : null)
@@ -65,6 +67,11 @@ Item {
       if (plugins[i] && plugins[i].id === root.pluginId) return plugins[i]
     return ({})
   }
+  // Two writes inside one probe tick (a commit and a push, say) must not
+  // clobber each other while the file reload is still in flight, so the
+  // entry we last wrote stands in for the file until it comes back.
+  property var writtenEntry: null
+  readonly property var liveEntry: writtenEntry || pluginEntry
   readonly property string corner: String(pluginEntry.corner || "bottom-right")
   readonly property int minSize: 8
   readonly property int maxSize: 48
@@ -89,12 +96,17 @@ Item {
   readonly property string ollamaModel: String(pluginEntry.ollamaModel || "llama3.2")
   readonly property bool allowRemoteLlm: pluginEntry.allowRemoteLlm === true
   readonly property int probeSeconds: Math.max(5, Number(pluginEntry.probeSeconds) || 20)
+  // Bookkeeping the buddy writes itself: the day it first ran (for its
+  // birthday costume) and today's achievement counters. See Mood.tally().
+  readonly property string installedOn: String(liveEntry.installedOn || "")
+  readonly property var stats: liveEntry.stats && typeof liveEntry.stats === "object" ? liveEntry.stats : ({})
 
   function updateSetting(name, value) {
     if (!shell || typeof shell.updateEntryInline !== "function") return false
     const next = ({})
-    for (const key in root.pluginEntry) if (key !== "id") next[key] = root.pluginEntry[key]
+    for (const key in root.liveEntry) if (key !== "id") next[key] = root.liveEntry[key]
     next[name] = value
+    root.writtenEntry = next
     shell.updateEntryInline(root.pluginId, next)
     return true
   }
@@ -140,11 +152,18 @@ Item {
   property real ignoredMin: 0
   property bool userIdle: false
   property double lastLineAt: 0
+  property var costume: Mood.costume(new Date(), root.installedOn)
 
   readonly property var faceSpec: Mood.face(root.mood)
+  function today() { return Qt.formatDate(new Date(), "yyyy-MM-dd") }
   readonly property var quipContext: ({
     repo: sensors ? sensors.repo : "", branch: sensors ? sensors.branch : "",
     dirty: sensors ? sensors.dirty : 0, hour: sensors ? sensors.hour : new Date().getHours(),
+    dow: sensors ? sensors.dow : 0, time: Qt.formatTime(new Date(), "HH:mm"),
+    untracked: sensors ? sensors.untracked : 0,
+    subject: sensors ? sensors.subject : "", fixes: sensors ? sensors.fixStreak : 0,
+    commits: stats.commits | 0, pushes: stats.pushes | 0,
+    days: Mood.daysBetween(root.installedOn, today()),
     streak: Math.round(streakMin), battery: sensors ? sensors.battery : -1,
     windows: sensors ? sensors.windows : 0,
     event: sensors && sensors.calendar ? sensors.calendar.title : "",
@@ -193,8 +212,24 @@ Item {
     face.talking = true
   }
 
+  // Poke fatigue: five pokes inside a minute and it sulks for a while,
+  // during which further pokes get a pointed look and no words.
+  property var pokeTimes: []
+  property double grumpyUntil: 0
   function poke() {
     root.ignoredMin = 0
+    const now = Date.now()
+    if (now < root.grumpyUntil) { root.forceMood("ignoring", 1500); return }
+    const recent = root.pokeTimes.filter(function(t) { return now - t < 60000 })
+    recent.push(now)
+    root.pokeTimes = recent
+    if (recent.length >= 5) {
+      root.pokeTimes = []
+      root.grumpyUntil = now + 45000
+      root.forceMood("grumpy", 45000)
+      root.speak("grumpy", true)
+      return
+    }
     root.forceMood("poked", 4000)
     root.speak("poked", true)
   }
@@ -206,7 +241,29 @@ Item {
     root.recompute()
   }
 
-  Timer { id: forcedTimer; onTriggered: { root.forcedMood = ""; root.recompute() } }
+  Timer {
+    id: forcedTimer
+    onTriggered: {
+      // A short forced face (a poke, a glance) ends inside a sulk: go back to sulking.
+      const left = root.grumpyUntil - Date.now()
+      if (left > 0) { root.forcedMood = "grumpy"; interval = left; restart() }
+      else root.forcedMood = ""
+      root.recompute()
+    }
+  }
+
+  // Achievements: count commits and pushes per day, remember the last
+  // battery panic, and celebrate the milestones Mood.tally() hands back.
+  function celebrate(mood) {
+    face.celebrate()
+    root.forceMood(mood, 8000)
+    root.speak(mood, false)
+  }
+  function tally(event) {
+    const r = Mood.tally(root.stats, event, root.mood, root.today())
+    if (JSON.stringify(r.stats) !== JSON.stringify(root.stats)) root.updateSetting("stats", r.stats)
+    for (let i = 0; i < r.awards.length; i++) root.celebrate(r.awards[i])
+  }
   Timer { id: bubbleTimer; onTriggered: root.bubbleOpen = false }
   Timer { id: talkTimer; onTriggered: face.talking = false }
 
@@ -231,7 +288,12 @@ Item {
         const fired = Mood.events(root.sensors, next)
         root.sensors = next
         root.recompute()
-        for (let i = 0; i < fired.length; i++) { root.forceMood(fired[i], 8000); root.speak(fired[i], false) }
+        for (let i = 0; i < fired.length; i++) {
+          if (fired[i] === "welcomeBack") root.streakMin = 0
+          root.forceMood(fired[i], 8000)
+          root.speak(fired[i], false)
+          root.tally(fired[i])
+        }
       }
     }
     stderr: StdioCollector {
@@ -260,6 +322,13 @@ Item {
       if (!root.userIdle) root.streakMin += 1
       root.ignoredMin += 1
       root.recompute()
+      // Midnight passes, the hat changes, a panic gets remembered.
+      const wardrobe = Mood.costume(new Date(), root.installedOn)
+      if (wardrobe.name !== root.costume.name) {
+        root.costume = wardrobe
+        if (wardrobe.name === "birthday") root.celebrate("birthday")
+      }
+      if (root.mood === "panic" && root.stats.lastPanic !== root.today()) root.tally("")
     }
   }
 
@@ -291,8 +360,10 @@ Item {
     function poke(): string { root.poke(); return "ok" }
     function mood(name: string): string { root.forceMood(name, 20000); root.speak(name, true); return root.mood }
     function state(): string {
-      return JSON.stringify({ mood: root.mood, reason: root.moodReason, tone: root.tone, streakMin: root.streakMin, muted: root.muted, sensors: root.sensors })
+      return JSON.stringify({ mood: root.mood, reason: root.moodReason, tone: root.tone, streakMin: root.streakMin, muted: root.muted,
+                              costume: root.costume.name, installedOn: root.installedOn, stats: root.stats, sensors: root.sensors })
     }
+    function celebrate(name: string): string { root.celebrate(name || "firstPush"); return "ok" }
     function set(name: string, value: string): string {
       const known = ["corner", "size", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "allowRemoteLlm", "probeSeconds"]
       if (known.indexOf(name) === -1) return "unknown setting: " + name + " (" + known.join(", ") + ")"
@@ -308,7 +379,12 @@ Item {
 
   Component.onCompleted: {
     root.recompute()
-    Qt.callLater(function() { root.say(Quips.pick("greeting", root.quipContext, root.tone)) })
+    Qt.callLater(function() {
+      if (!root.installedOn && root.shellConfig) root.updateSetting("installedOn", root.today())
+      root.costume = Mood.costume(new Date(), root.installedOn)
+      if (root.costume.name === "birthday") root.celebrate("birthday")
+      else root.say(Quips.pick("greeting", root.quipContext, root.tone))
+    })
   }
 
   // -------------------------------------------------------------------- ui
@@ -359,6 +435,7 @@ Item {
         eyes: root.faceSpec.eyes
         mouth: root.faceSpec.mouth
         extra: root.faceSpec.extra
+        hat: root.costume.hat
         color: root.roleColor(root.faceSpec.role)
         bob: root.faceSpec.bob
         scale: drag.active ? 1.06 : (hover.hovered ? 1.03 : 1.0)
