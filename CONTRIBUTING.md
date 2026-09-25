@@ -41,8 +41,7 @@ These rules apply to every change, however small:
   `read_capped`, `run_capped`, `clip`, and `out_max`). Strings that reach the
   panel are clipped, lists are capped in length, files are opened without
   following symlinks, and the panel drops any snapshot over its own cap
-  again. A time limit alone is not a cap. Run `.claude/skills/bounded-inputs/audit.sh`
-  before pushing; it fails on the patterns a marketplace reviewer flags.
+  again. A time limit alone is not a cap.
 - **No new daemons, no new packages, no network listeners.** If a feature
   needs one, it probably belongs in a separate project the plugin can talk to.
 - **No secrets in settings.** Settings live in `shell.json` in plain text.
