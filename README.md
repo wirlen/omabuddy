@@ -201,6 +201,18 @@ to follow.
   files are read without following symlinks, and a snapshot over 16 KiB is
   refused by the probe and dropped again by the panel. A hostile repo or an
   oversized record costs a bounded read, never a large allocation.
+- Its own settings and your theme's colours are read the same way. The
+  panel only watches `shell.json` and the theme's `colors.toml` for changes;
+  `scripts/config.sh` reads them (`shell.json` up to 1 MiB, `colors.toml` up
+  to 64 KiB), and hands back only this plugin's entry (at most 32 KiB) or the
+  `name = "#hex"` colour lines (at most 64). These two files are often
+  dotfile-manager symlinks, so they are resolved to their target first; the
+  target must still be a regular file under the same caps.
+- Nothing it learns is put on a command line, where any local user could
+  read it in `/proc`. Repo paths, branch names, commit subjects, event titles
+  and the Ollama prompt travel through pipes and the process environment
+  (readable only by you): git runs from inside the repo, jq reads strings
+  from its environment, and curl takes the request body on stdin.
 - Every line it shows is rendered as plain text, never markup. That includes
   a commit subject quoted back at you.
 - On its own, it writes only two keys in its own `shell.json` entry:

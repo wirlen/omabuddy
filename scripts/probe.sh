@@ -9,10 +9,15 @@
 # producer-side at max+1 bytes and thrown away if it reaches that, and the
 # final snapshot is refused rather than printed if it grows past out_max.
 # Time is bounded by the panel (timeout -k 2 15); bytes are bounded here.
+#
+# Nothing it learns goes on a command line. /proc/<pid>/cmdline is readable
+# by every local user, so paths, names, titles and subjects travel through
+# pipes, the environment (readable only by you), and builtins: git runs from
+# inside the repo instead of being handed its path, and the snapshot is
+# assembled by jq from the environment.
 set -u
 
-# Stderr goes back to the panel, which keeps it in memory: cap it too.
-exec 2> >(head -c 4096 >&2)
+. "${BASH_SOURCE[0]%/*}/lib.sh" || exit 1   # stderr cap, read_capped, run_capped
 
 str_max=128        # chars kept of any name, branch or title
 json_max=1048576   # bytes of any single JSON document parsed (hyprctl, feeds)
@@ -22,19 +27,6 @@ lines_max=20000    # git output lines counted before we stop caring
 out_max=16384      # bytes of the snapshot itself
 
 clip() { printf '%s' "${1:0:${2:-$str_max}}"; }
-# Bounded, no-follow read of a file we did not write: refuses symlinks and
-# anything that is not a regular file, then emits at most max+1 bytes so a
-# file that grows under us still cannot exceed the cap. Callers treat a
-# document cut at max+1 as unparseable, which jq guarantees for objects.
-read_capped() {
-  local f="$1" max="$2" size
-  [[ -f "$f" && ! -L "$f" && -r "$f" ]] || return 1
-  size="$(stat -c %s -- "$f" 2>/dev/null)" || return 1
-  (( size <= max )) || return 1
-  head -c "$((max + 1))" -- "$f"
-}
-# Same cap on a tool's stdout: nothing past max+1 bytes is ever buffered.
-run_capped() { local max="$1"; shift; "$@" 2>/dev/null | head -c "$((max + 1))"; }
 
 pid="$(run_capped "$json_max" hyprctl activewindow -j | jq -r '.pid // empty' 2>/dev/null)"
 pid="$(clip "$pid" 16)"
@@ -58,6 +50,8 @@ fi
 # every call switches those off; -c wins over repo config. Nothing here needs
 # hooks, pagers, signatures, or external tools.
 g() { git -c core.fsmonitor=false -c core.pager=cat -c diff.external= -c log.showSignature=false "$@"; }
+# git in a directory without putting the directory on git's command line.
+gin() { local dir="$1"; shift; (cd -- "$dir" 2>/dev/null && g "$@"); }
 
 # Only counts and clipped names are kept. The diff and ls-files listings are
 # streamed through head so a repo with a million files costs a bounded read
@@ -66,19 +60,19 @@ g() { git -c core.fsmonitor=false -c core.pager=cat -c diff.external= -c log.sho
 # kernel (PATH_MAX); a hostile HEAD file can be any length, so branch is
 # clipped.
 in_repo=false branch="" dirty=0 untracked=0 ahead=0 last_commit=0 repo="" subject="" fix_streak=0
-if [[ -n "$cwd" ]] && top="$(g -C "$cwd" rev-parse --show-toplevel 2>/dev/null | head -c 4097)" && [[ -d "$top" ]]; then
+if [[ -n "$cwd" ]] && top="$(gin "$cwd" rev-parse --show-toplevel 2>/dev/null | head -c 4097)" && [[ -d "$top" ]]; then
   in_repo=true
-  repo="$(clip "$(basename "$top")")"
-  branch="$(clip "$(g -C "$top" rev-parse --abbrev-ref HEAD 2>/dev/null | head -c "$((str_max * 4))")")"
-  dirty="$(g -C "$top" diff --no-ext-diff --no-textconv --numstat HEAD 2>/dev/null | head -n "$lines_max" | awk '{a+=$1; d+=$2} END {print a+d+0}')"
-  untracked="$(g -C "$top" ls-files --others --exclude-standard 2>/dev/null | head -n "$lines_max" | wc -l)"
-  ahead="$(g -C "$top" rev-list --count '@{u}..HEAD' 2>/dev/null | head -c 32 || echo 0)"
-  last_commit="$(g -C "$top" log -1 --no-show-signature --format=%ct 2>/dev/null | head -c 32 || echo 0)"
+  repo="$(clip "${top##*/}")"
+  branch="$(clip "$(gin "$top" rev-parse --abbrev-ref HEAD 2>/dev/null | head -c "$((str_max * 4))")")"
+  dirty="$(gin "$top" diff --no-ext-diff --no-textconv --numstat HEAD 2>/dev/null | head -n "$lines_max" | awk '{a+=$1; d+=$2} END {print a+d+0}')"
+  untracked="$(gin "$top" ls-files --others --exclude-standard 2>/dev/null | head -n "$lines_max" | wc -l)"
+  ahead="$(gin "$top" rev-list --count '@{u}..HEAD' 2>/dev/null | head -c 32 || echo 0)"
+  last_commit="$(gin "$top" log -1 --no-show-signature --format=%ct 2>/dev/null | head -c 32 || echo 0)"
   # The commit subject is whatever the author typed, so it is clipped like a
   # branch name. The streak is how many of the last eight subjects in a row
   # start with "fix": eight lines of at most 512 bytes each are looked at.
-  subject="$(clip "$(g -C "$top" log -1 --no-show-signature --format=%s 2>/dev/null | head -c "$((str_max * 4))" | tr -d '\n')")"
-  fix_streak="$(g -C "$top" log -8 --no-show-signature --format=%s 2>/dev/null | head -n 8 | head -c 4096 \
+  subject="$(clip "$(gin "$top" log -1 --no-show-signature --format=%s 2>/dev/null | head -c "$((str_max * 4))" | tr -d '\n')")"
+  fix_streak="$(gin "$top" log -8 --no-show-signature --format=%s 2>/dev/null | head -n 8 | head -c 4096 \
     | awk 'tolower($0) ~ /^(fix|fixes|fixed|fixup|hotfix)([^a-z]|$)/ {n++; next} {exit} END {print n+0}')"
 fi
 
@@ -151,20 +145,22 @@ last_commit="$(num "$last_commit" 0)"; cores="$(num "$cores" 1)"; hour="$(num "$
 fix_streak="$(num "$fix_streak" 0)"
 windows="$(num "$windows" 0)"; agent_windows="$(num "$agent_windows" 0)"; agent_busy="$(num "$agent_busy" 0)"
 
-out="$(jq -cn \
-  --arg cwd "$cwd" --arg repo "$repo" --arg branch "$branch" --arg subject "$subject" --argjson fixStreak "$fix_streak" \
+# Strings (and the agent list) reach jq through its environment, not its
+# arguments; only counts, flags and the clock are arguments.
+out="$(OB_CWD="$cwd" OB_REPO="$repo" OB_BRANCH="$branch" OB_SUBJECT="$subject" OB_CAL_TITLE="$cal_title" OB_AGENTS="$agents_json" \
+  jq -cn --argjson fixStreak "$fix_streak" \
   --argjson inRepo "$in_repo" --argjson dirty "$dirty" --argjson untracked "$untracked" \
   --argjson ahead "$ahead" --argjson lastCommit "$last_commit" \
   --argjson battery "$battery" --argjson charging "$charging" \
   --argjson load "$load1" --argjson cores "$cores" --argjson hour "$hour" --argjson dow "$dow" \
-  --argjson calHas "$cal_has" --arg calTitle "$cal_title" --argjson calEta "$cal_eta" \
-  --argjson agents "$agents_json" --argjson agentWindows "$agent_windows" --argjson agentBusy "$agent_busy" --argjson windows "$windows" \
-  '{cwd:$cwd, repo:$repo, branch:$branch, inRepo:$inRepo, dirty:$dirty, untracked:$untracked,
-    ahead:$ahead, lastCommit:$lastCommit, subject:$subject, fixStreak:$fixStreak,
+  --argjson calHas "$cal_has" --argjson calEta "$cal_eta" \
+  --argjson agentWindows "$agent_windows" --argjson agentBusy "$agent_busy" --argjson windows "$windows" \
+  '{cwd:env.OB_CWD, repo:env.OB_REPO, branch:env.OB_BRANCH, inRepo:$inRepo, dirty:$dirty, untracked:$untracked,
+    ahead:$ahead, lastCommit:$lastCommit, subject:env.OB_SUBJECT, fixStreak:$fixStreak,
     battery:$battery, charging:$charging,
     load:$load, cores:$cores, hour:$hour, dow:$dow, now:(now|floor),
-    calendar:{has:$calHas, title:$calTitle, eta:$calEta},
-    agents:$agents, agentWindows:$agentWindows, agentBusy:$agentBusy, windows:$windows}')" || exit 1
+    calendar:{has:$calHas, title:env.OB_CAL_TITLE, eta:$calEta},
+    agents:(env.OB_AGENTS | fromjson), agentWindows:$agentWindows, agentBusy:$agentBusy, windows:$windows}')" || exit 1
 # The panel refuses anything over out_max as well; this is the producer side.
 (( $(printf '%s' "$out" | wc -c) <= out_max )) || { echo "omabuddy probe: snapshot over $out_max bytes, dropped" >&2; exit 1; }
 printf '%s\n' "$out"

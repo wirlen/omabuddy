@@ -37,11 +37,21 @@ These rules apply to every change, however small:
   `localhost`, `127.x.y.z` and `::1`, never a prefix. Keep it that strict.
 - **Bound every input in bytes.** Anything read from a network endpoint, a
   file, or a tool's output is capped producer-side before it is parsed and
-  rejected at max+1 (see `scripts/ollama.sh`: 64 KiB; `scripts/probe.sh`:
-  `read_capped`, `run_capped`, `clip`, and `out_max`). Strings that reach the
-  panel are clipped, lists are capped in length, files are opened without
-  following symlinks, and the panel drops any snapshot over its own cap
-  again. A time limit alone is not a cap.
+  rejected at max+1 (see `scripts/ollama.sh`: 64 KiB; `scripts/lib.sh`:
+  `read_capped` and `run_capped`; `scripts/probe.sh`: `clip` and `out_max`).
+  Strings that reach the panel are clipped, lists are capped in length,
+  files are opened without following symlinks (only `shell.json` and the
+  theme's `colors.toml`, which are often dotfile links, are resolved first
+  with `resolve_link`), and the panel drops any output over its own cap
+  again. The panel never reads a file itself: its `FileView`s only watch,
+  and `scripts/config.sh` does the capped read. A time limit alone is not a
+  cap.
+- **Keep data off command lines.** `/proc/<pid>/cmdline` is readable by
+  every local user; `/proc/<pid>/environ` only by you. Paths, repo and
+  branch names, commit subjects, event titles and prompts travel through
+  pipes and the environment: jq reads `env.NAME` rather than `--arg`, curl
+  takes its body with `--data-binary @-`, and git runs from inside the repo
+  (`gin`) rather than with `-C <path>`.
 - **No new daemons, no new packages, no network listeners.** If a feature
   needs one, it probably belongs in a separate project the plugin can talk to.
 - **No secrets in settings.** Settings live in `shell.json` in plain text.

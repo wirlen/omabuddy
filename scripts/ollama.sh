@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 # Ask a local Ollama for a one-liner. Prints the line, or nothing on any
 # failure so the panel falls back to a canned quip. Never blocks for long.
-#   ollama.sh <url> <model> <mood> <context-json> [remote-ok]
+#   OMABUDDY_URL=... OMABUDDY_MODEL=... OMABUDDY_MOOD=... OMABUDDY_CTX=<json> ollama.sh [remote-ok]
+#
+# The mood and context describe your repo, branch, commit subject and next
+# meeting, so they arrive in the environment, never on a command line:
+# /proc/<pid>/cmdline is readable by every local user, /proc/<pid>/environ
+# only by you. For the same reason the request body reaches curl on stdin.
 set -u
-url="${1:-http://localhost:11434}"
-model="${2:-llama3.2}"
-mood="${3:-idle}"
-ctx="${4:-{\}}"
-remote_ok="${5:-}"
+url="${OMABUDDY_URL:-http://localhost:11434}"
+export OMABUDDY_MODEL="${OMABUDDY_MODEL:-llama3.2}" OMABUDDY_MOOD="${OMABUDDY_MOOD:-idle}" OMABUDDY_CTX="${OMABUDDY_CTX:-{\}}"
+remote_ok="${1:-}"
+
+# The panel clips everything it puts here; this is the producer-side check.
+# Oversized input is refused whole, never cut and used. Lengths are counted
+# in bytes whatever the locale; the panel counts UTF-16 units (512 and 8192
+# for mood and context), and one unit is at most three UTF-8 bytes.
+LC_ALL=C
+(( ${#url} <= 256 && ${#OMABUDDY_MODEL} <= 128 && ${#OMABUDDY_MOOD} <= 1536 && ${#OMABUDDY_CTX} <= 24576 )) || exit 1
+[[ "$OMABUDDY_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || exit 1
 
 # The context describes your repo, branch, next meeting and agent usage. It
 # only goes to an http(s) endpoint, and only to this machine unless the
@@ -24,15 +35,6 @@ if [[ "$host" == \[* ]]; then host="${host#[}"; host="${host%%]*}"; else host="$
 if [[ "$host" == localhost || "$host" == ::1 ]] || [[ "$host" =~ ^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then :
 else [[ "$remote_ok" == "remote-ok" ]] || exit 1; fi
 
-system="You are Omabuddy, a tiny desktop companion living in the corner of a developer's Linux screen. \
-Reply with ONE short line, under 90 characters, no quotes, no emoji, no preamble. \
-Be warm, dry, a little funny. Never give advice longer than a sentence. Your current mood is: $mood."
-
-prompt="Context about the developer right now (JSON): $ctx
-Say one line to them."
-
-payload="$(jq -cn --arg m "$model" --arg s "$system" --arg p "$prompt" \
-  '{model:$m, system:$s, prompt:$p, stream:false, options:{temperature:0.9, num_predict:40}}')"
 
 # A remote or compromised endpoint must not be able to make jq buffer an
 # unbounded document. One line of reply never needs more than 64 KiB, so
@@ -42,11 +44,21 @@ payload="$(jq -cn --arg m "$model" --arg s "$system" --arg p "$prompt" \
 # followed, and the cap sits on whatever curl emits. curl stops on its own at
 # the same boundary (--max-filesize), so head is the guard if curl is older.
 max_bytes=65536
+cap=$((max_bytes + 1))
 body="$(mktemp)" || exit 1
 trap 'rm -f "$body"' EXIT
-curl -sS -m 12 --max-filesize "$((max_bytes + 1))" -X POST "$url/api/generate" \
-  -H 'Content-Type: application/json' -d "$payload" 2>/dev/null \
-  | head -c "$((max_bytes + 1))" > "$body"
+# The request is assembled inside jq from the environment, so no part of the
+# prompt is ever an argument to jq or curl.
+jq -cn '{model: env.OMABUDDY_MODEL,
+    system: ("You are Omabuddy, a tiny desktop companion living in the corner of a developer'"'"'s Linux screen. "
+      + "Reply with ONE short line, under 90 characters, no quotes, no emoji, no preamble. "
+      + "Be warm, dry, a little funny. Never give advice longer than a sentence. Your current mood is: "
+      + env.OMABUDDY_MOOD + "."),
+    prompt: ("Context about the developer right now (JSON): " + env.OMABUDDY_CTX + "\nSay one line to them."),
+    stream: false, options: {temperature: 0.9, num_predict: 40}}' \
+  | curl -sS -m 12 --max-filesize "$cap" -X POST "$url/api/generate" \
+      -H 'Content-Type: application/json' --data-binary @- 2>/dev/null \
+  | head -c "$cap" > "$body"
 size="$(stat -c %s "$body" 2>/dev/null)" || exit 1
 (( size > max_bytes )) && exit 1
 # bounded: the body file is refused above once it reaches max+1 bytes.

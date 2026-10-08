@@ -42,29 +42,90 @@ Item {
   readonly property string scriptsDir: home + "/.config/omarchy/plugins/" + pluginId + "/scripts"
 
   // ---------------------------------------------------------------- settings
-  // The shell API hands panel plugins no view of shell.json, so read our own
-  // plugins[] entry straight from the file and follow it as it changes (the
-  // shell rewrites it whenever updateEntryInline() persists a setting).
-  readonly property string shellConfigPath: home + "/.config/omarchy/shell.json"
-  property var shellConfig: null
+  // The shell API hands panel plugins no view of shell.json, so the panel
+  // follows its own plugins[] entry in the file (the shell rewrites it
+  // whenever updateEntryInline() persists a setting), plus the theme's
+  // colors.toml. It never reads either file itself: the FileViews below only
+  // watch them, with every read blocked, and scripts/config.sh does the
+  // reading under byte caps, one file per run, handing back just our entry
+  // or the colour table. Its output is capped again here before it is parsed.
+  property var fileEntry: null      // our entry as config.sh last saw it, null if unreadable
+  property bool configLoaded: false
   FileView {
-    id: shellConfigFile
-    path: root.shellConfigPath
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.readShellConfig(text())
-    onLoadFailed: root.readShellConfig("")
-    onFileChanged: reload()
+    path: root.home + "/.config/omarchy/shell.json"
+    preload: false; blockAllReads: true; watchChanges: true; printErrors: false
+    onFileChanged: root.readConfig(entryReader)
   }
-  function readShellConfig(raw) {
-    try {
-      const parsed = JSON.parse(String(raw || "").trim() || "{}")
-      root.shellConfig = parsed && typeof parsed === "object" ? parsed : null
-    } catch (e) { root.shellConfig = null }
-    root.writtenEntry = null
+  FileView {
+    path: root.home + "/.local/state/omarchy/current/theme/colors.toml"
+    preload: false; blockAllReads: true; watchChanges: true; printErrors: false
+    onFileChanged: root.readConfig(colorsReader)
+  }
+  // A change that lands while a read is running is read again once it has
+  // exited; the restart is queued from outside the exited handler.
+  function readConfig(reader) {
+    if (reader.running) { reader.again = true; return }
+    reader.startGen = root.writeGen
+    reader.running = true
+  }
+  function rereadIfNeeded(reader) {
+    // A fresh closure each time: Qt.callLater folds repeat calls of one
+    // function, which would drop one reader when both queue together.
+    if (reader.again) { reader.again = false; Qt.callLater(() => root.readConfig(reader)) }
+  }
+  // If config.sh never reports at all, the buddy still wakes up and greets.
+  Timer { id: configFallback; interval: 1500; onTriggered: root.firstConfig() }
+  readonly property int configMaxBytes: 40960
+  function parseConfig(text) {
+    if (text.length > root.configMaxBytes) { console.warn("omabuddy: config over", root.configMaxBytes, "bytes, dropped"); return null }
+    let next
+    try { next = JSON.parse(text) } catch (e) { console.warn("omabuddy: config unreadable:", e); return null }
+    return next && typeof next === "object" && !Array.isArray(next) ? next : null
+  }
+  Process {
+    id: entryReader
+    property bool again: false
+    property int startGen: 0
+    command: ["timeout", "-k", "2", "5", root.scriptsDir + "/config.sh", root.pluginId, "entry"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyEntry(root.parseConfig(text), entryReader.startGen)
+    }
+    onExited: {
+      root.rereadIfNeeded(entryReader)
+      if (!root.configLoaded) configFallback.start()
+    }
+  }
+  Process {
+    id: colorsReader
+    property bool again: false
+    property int startGen: 0
+    command: ["timeout", "-k", "2", "5", root.scriptsDir + "/config.sh", root.pluginId, "colors"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyColors(root.parseConfig(text))
+    }
+    onExited: root.rereadIfNeeded(colorsReader)
+  }
+  function applyEntry(next, startGen) {
+    const entry = next ? next.entry : null
+    root.fileEntry = entry && typeof entry === "object" && !Array.isArray(entry) ? entry : null
+    // The entry we wrote stands in for the file until a read that started
+    // after our last write comes back. An older read may predate that write.
+    if (startGen === root.writeGen) root.writtenEntry = null
+    if (!root.installedOn && root.entryKnown) root.updateSetting("installedOn", root.today())
+    root.firstConfig()
+  }
+  function applyColors(next) {
+    const colors = ({})
+    const raw = next && next.colors && typeof next.colors === "object" ? next.colors : ({})
+    for (const key in raw)
+      if (/^[a-z_]{1,32}$/.test(key) && /^#[0-9a-fA-F]{6,8}$/.test(String(raw[key]))) colors[key] = String(raw[key])
+    root.themeColors = colors
   }
   readonly property var pluginEntry: {
-    const config = root.shellConfig || (shell ? shell.shellConfig : null)
+    if (root.fileEntry) return root.fileEntry
+    const config = shell ? shell.shellConfig : null
     const plugins = config && Array.isArray(config.plugins) ? config.plugins : []
     for (let i = 0; i < plugins.length; i++)
       if (plugins[i] && plugins[i].id === root.pluginId) return plugins[i]
@@ -74,10 +135,15 @@ Item {
   // clobber each other while the file reload is still in flight, so the
   // entry we last wrote stands in for the file until it comes back.
   property var writtenEntry: null
+  property int writeGen: 0
   readonly property var liveEntry: writtenEntry || pluginEntry
+  // Whether liveEntry is our real entry rather than the empty fallback. A
+  // write replaces the whole entry, so nothing is written until it is.
+  readonly property bool entryKnown: !!(writtenEntry || fileEntry || pluginEntry.id === pluginId)
   // Settings follow liveEntry, so a click on the settings card shows at once
   // instead of after the shell.json round-trip.
-  readonly property string corner: String(liveEntry.corner || "bottom-right")
+  readonly property var corners: ["top-left", "top-right", "bottom-left", "bottom-right"]
+  readonly property string corner: corners.indexOf(String(liveEntry.corner)) !== -1 ? String(liveEntry.corner) : "bottom-right"
   readonly property int minSize: 8
   readonly property int maxSize: 48
   readonly property int size: Math.min(maxSize, Math.max(minSize, Number(liveEntry.size) || 14)) // face font size in px
@@ -93,50 +159,45 @@ Item {
     root.pendingSize = Math.min(root.maxSize, Math.max(root.minSize, from + delta))
     sizeCommit.restart()
   }
-  // Unknown names in shell.json fall back to the defaults rather than
-  // reaching the art or the quip tables.
+  // Everything in the entry is untrusted: unknown names fall back to the
+  // defaults rather than reaching the art or the quip tables, numbers are
+  // clamped (a huge chattiness would overflow the timer), and the Ollama
+  // strings must look like a URL and a model name.
   readonly property string tone: Quips.toneIds().indexOf(String(liveEntry.tone)) !== -1 ? String(liveEntry.tone) : "snarky"
   readonly property string buddyId: Buddies.ids().indexOf(String(liveEntry.buddy)) !== -1 ? String(liveEntry.buddy) : "blob"
-  readonly property int chattiness: Math.max(1, Number(liveEntry.chattiness) || 12) // minutes between unprompted lines
+  readonly property int chattiness: Math.min(240, Math.max(1, Number(liveEntry.chattiness) || 12)) // minutes between unprompted lines
   readonly property bool muted: liveEntry.muted === true
-  readonly property string llm: String(liveEntry.llm || "off")
-  readonly property string ollamaUrl: String(liveEntry.ollamaUrl || "http://localhost:11434")
-  readonly property string ollamaModel: String(liveEntry.ollamaModel || "llama3.2")
+  readonly property string llm: liveEntry.llm === "ollama" ? "ollama" : "off"
+  readonly property string ollamaUrl: validUrl(liveEntry.ollamaUrl) ? String(liveEntry.ollamaUrl) : "http://localhost:11434"
+  readonly property string ollamaModel: validModel(liveEntry.ollamaModel) ? String(liveEntry.ollamaModel) : "llama3.2"
+  function validUrl(v) { return typeof v === "string" && v.length <= 256 && /^https?:\/\/[^\s]+$/.test(v) }
+  function validModel(v) { return typeof v === "string" && /^[A-Za-z0-9._:\/-]{1,128}$/.test(v) }
   readonly property bool allowRemoteLlm: liveEntry.allowRemoteLlm === true
-  readonly property int probeSeconds: Math.max(5, Number(liveEntry.probeSeconds) || 20)
+  readonly property int probeSeconds: Math.min(3600, Math.max(5, Number(liveEntry.probeSeconds) || 20))
   // Bookkeeping the buddy writes itself: the day it first ran (for its
   // birthday costume) and today's achievement counters. See Mood.tally().
-  readonly property string installedOn: String(liveEntry.installedOn || "")
+  readonly property string installedOn: /^\d{4}-\d{2}-\d{2}$/.test(String(liveEntry.installedOn)) ? String(liveEntry.installedOn) : ""
   readonly property var stats: liveEntry.stats && typeof liveEntry.stats === "object" ? liveEntry.stats : ({})
 
   function updateSetting(name, value) {
     if (!shell || typeof shell.updateEntryInline !== "function") return false
+    // A write is the whole entry, so it waits until the entry has been read:
+    // writing over an unread entry would reset every other setting.
+    if (!root.entryKnown) return false
     const next = ({})
     for (const key in root.liveEntry) if (key !== "id") next[key] = root.liveEntry[key]
     next[name] = value
     root.writtenEntry = next
+    root.writeGen++
     shell.updateEntryInline(root.pluginId, next)
     return true
   }
 
   // ----------------------------------------------------------------- palette
   // The shell exposes accent/urgent/muted; the design also wants green,
-  // yellow and cyan, so read them straight from the active theme's colors.toml.
+  // yellow and cyan, so config.sh also hands back the active theme's
+  // colors.toml table (see applyColors).
   property var themeColors: ({})
-  FileView {
-    path: root.home + "/.local/state/omarchy/current/theme/colors.toml"
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.themeColors = root.parseToml(text())
-    onFileChanged: reload()
-  }
-  function parseToml(text) {
-    const out = ({})
-    const re = /^\s*([a-z_]+)\s*=\s*"(#[0-9a-fA-F]{6,8})"/gm
-    let m
-    while ((m = re.exec(String(text || ""))) !== null) out[m[1]] = m[2]
-    return out
-  }
   function roleColor(role) {
     const t = root.themeColors
     switch (role) {
@@ -197,12 +258,18 @@ Item {
     root.lastLineAt = Date.now()
     if (root.llm === "ollama" && !ollama.running) {
       ollama.moodForLine = mood
-      // The mood slot of the prompt also says who is talking and in what voice.
+      // The mood slot of the prompt also says who is talking and in what
+      // voice. Mood and context describe your repo and calendar, so they go
+      // in the environment (readable only by you), never on the command
+      // line. ollama.sh refuses both above these sizes; so does this side.
       const persona = mood + " (you are " + Buddies.byId(root.buddyId).persona + "; your voice is " + Quips.tone(root.tone).persona + ")"
-      ollama.command = [root.scriptsDir + "/ollama.sh", root.ollamaUrl, root.ollamaModel, persona,
-                        JSON.stringify(root.quipContext), root.allowRemoteLlm ? "remote-ok" : ""]
-      ollama.running = true
-      return
+      const ctx = JSON.stringify(root.quipContext)
+      if (persona.length <= 512 && ctx.length <= 8192) {
+        ollama.environment = ({ OMABUDDY_URL: root.ollamaUrl, OMABUDDY_MODEL: root.ollamaModel, OMABUDDY_MOOD: persona, OMABUDDY_CTX: ctx })
+        ollama.command = ["timeout", "-k", "2", "20", root.scriptsDir + "/ollama.sh", root.allowRemoteLlm ? "remote-ok" : ""]
+        ollama.running = true
+        return
+      }
     }
     root.say(Quips.pick(mood, root.quipContext, root.tone, root.buddyId))
   }
@@ -210,7 +277,8 @@ Item {
   readonly property int maxLineLength: 280
 
   function say(text) {
-    let clean = String(text || "").trim()
+    // Lines come from IPC and Ollama too: clip before any other work.
+    let clean = String(text || "").slice(0, root.maxLineLength * 4).trim()
     if (!clean) return
     if (clean.length > root.maxLineLength) clean = clean.slice(0, root.maxLineLength - 1) + "…"
     root.line = clean
@@ -246,6 +314,10 @@ Item {
     root.speak("poked", true)
   }
 
+  // Mood names arriving over IPC are checked against the quip table, so an
+  // arbitrary string never reaches the face, the bubble or the Ollama prompt.
+  function knownMood(name) { return typeof name === "string" && Object.prototype.hasOwnProperty.call(Quips.lines, name) }
+
   function forceMood(name, ms) {
     root.forcedMood = name
     forcedTimer.interval = ms
@@ -272,6 +344,8 @@ Item {
     root.speak(mood, false)
   }
   function tally(event) {
+    // Stats we have not read yet would hand out every award again.
+    if (!root.entryKnown) return
     const r = Mood.tally(root.stats, event, root.mood, root.today())
     if (JSON.stringify(r.stats) !== JSON.stringify(root.stats)) root.updateSetting("stats", r.stats)
     for (let i = 0; i < r.awards.length; i++) root.celebrate(r.awards[i])
@@ -380,10 +454,13 @@ Item {
   Process {
     id: ollama
     property string moodForLine: "idle"
+    // ollama.sh prints one line of at most 120 characters; anything over
+    // 1 KiB here is dropped unread and a canned line is used instead.
+    property int maxBytes: 1024
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        const got = String(text || "").trim()
+        const got = text.length > ollama.maxBytes ? "" : String(text || "").trim()
         root.say(got ? got : Quips.pick(ollama.moodForLine, root.quipContext, root.tone, root.buddyId))
       }
     }
@@ -395,21 +472,32 @@ Item {
     target: "omabuddy"
     function say(text: string): string { root.say(text); return "ok" }
     function poke(): string { root.poke(); return "ok" }
-    function mood(name: string): string { root.forceMood(name, 20000); root.speak(name, true); return root.mood }
+    function mood(name: string): string {
+      if (!root.knownMood(name)) return "unknown mood: " + String(name).slice(0, 64)
+      root.forceMood(name, 20000); root.speak(name, true); return root.mood
+    }
     function settings(): string { root.cardOpen ? root.closeSettings() : root.openSettings(); return root.cardOpen ? "open" : "closed" }
     function state(): string {
       return JSON.stringify({ mood: root.mood, reason: root.moodReason, buddy: root.buddyId, tone: root.tone, streakMin: root.streakMin, muted: root.muted,
                               costume: root.costume.name, installedOn: root.installedOn, stats: root.stats, sensors: root.sensors })
     }
-    function celebrate(name: string): string { root.celebrate(name || "firstPush"); return "ok" }
+    function celebrate(name: string): string {
+      const what = name || "firstPush"
+      if (!root.knownMood(what)) return "unknown mood: " + String(what).slice(0, 64)
+      root.celebrate(what); return "ok"
+    }
     function set(name: string, value: string): string {
       const known = ["corner", "size", "buddy", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "allowRemoteLlm", "probeSeconds"]
       if (known.indexOf(name) === -1) return "unknown setting: " + name + " (" + known.join(", ") + ")"
       let v = value
       if (name === "muted" || name === "allowRemoteLlm") v = value === "true"
-      else if (name === "ollamaUrl" && !/^https?:\/\//.test(value)) return "ollamaUrl must start with http:// or https://"
+      else if (name === "ollamaUrl" && !root.validUrl(value)) return "ollamaUrl must be an http:// or https:// URL of at most 256 characters"
+      else if (name === "ollamaModel" && !root.validModel(value)) return "ollamaModel must be 1 to 128 of A-Z a-z 0-9 . _ : / -"
+      else if (name === "corner" && root.corners.indexOf(value) === -1) return "corner must be one of " + root.corners.join(", ")
+      else if (name === "llm" && value !== "off" && value !== "ollama") return "llm must be off or ollama"
       else if (name === "size") { v = Number(value); if (!(v >= root.minSize && v <= root.maxSize)) return "size must be " + root.minSize + " to " + root.maxSize }
-      else if (name === "chattiness" || name === "probeSeconds") v = Number(value)
+      else if (name === "chattiness") { v = Number(value); if (!(v >= 1 && v <= 240)) return "chattiness must be 1 to 240 minutes" }
+      else if (name === "probeSeconds") { v = Number(value); if (!(v >= 5 && v <= 3600)) return "probeSeconds must be 5 to 3600" }
       else if (name === "tone" && Quips.toneIds().indexOf(value) === -1) return "tone must be one of " + Quips.toneIds().join(", ")
       else if (name === "buddy") {
         if (Buddies.ids().indexOf(value) === -1) return "buddy must be one of " + Buddies.ids().join(", ")
@@ -420,14 +508,21 @@ Item {
     }
   }
 
+  // First word once the settings are in (or known to be unreadable), so the
+  // greeting comes from the right critter in the right voice. installedOn is
+  // only written over an entry that was actually read, never over defaults.
+  function firstConfig() {
+    if (root.configLoaded) return
+    root.configLoaded = true
+    root.costume = Mood.costume(new Date(), root.installedOn)
+    if (root.costume.name === "birthday") root.celebrate("birthday")
+    else root.say(Quips.pick("greeting", root.quipContext, root.tone, root.buddyId))
+  }
+
   Component.onCompleted: {
     root.recompute()
-    Qt.callLater(function() {
-      if (!root.installedOn && root.shellConfig) root.updateSetting("installedOn", root.today())
-      root.costume = Mood.costume(new Date(), root.installedOn)
-      if (root.costume.name === "birthday") root.celebrate("birthday")
-      else root.say(Quips.pick("greeting", root.quipContext, root.tone, root.buddyId))
-    })
+    root.readConfig(entryReader)
+    root.readConfig(colorsReader)
   }
 
   // -------------------------------------------------------------------- ui

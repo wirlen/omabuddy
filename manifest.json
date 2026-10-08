@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "wirlen.omabuddy",
   "name": "Omabuddy",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "author": "wirlen",
   "license": "MIT",
   "description": "A small, mostly useless desktop companion (a blob, cat, ghost or bot) that lives in a corner, reacts to your git repos, the clock, and your machine, and says things. Optional Ollama-powered voice.",
