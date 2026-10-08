@@ -57,7 +57,8 @@ repository, or email the maintainer, rather than opening a public issue.
 - **Quips.** The easiest contribution. One line, under 90 characters,
   quoting untrusted tokens like `{subject}` or `{branch}` is fine because
   the bubble is plain text.
-  lowercase, kind, ideally in both tones. No politics, no jokes at a group's
+  lowercase, kind, ideally in all four tones (a missing one borrows the
+  snarky line). No politics, no jokes at a group's
   expense, no advice longer than a sentence.
 - **Moods and faces.** Come with a screenshot and a one-line reason the
   buddy would feel that way.

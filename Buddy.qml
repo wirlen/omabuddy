@@ -6,16 +6,18 @@
 // mood in Mood.js, and speaks lines from Quips.js (or, opted in, from a local
 // Ollama).
 //
-//   Click        poke it
-//   Drag         move it; it snaps to the nearest corner and remembers
-//   Scroll       grow / shrink it
-//   Right-click  mute / unmute the speech bubble
+//   Click         poke it
+//   Drag          move it; it snaps to the nearest corner and remembers
+//   Scroll        grow / shrink it
+//   Right-click   open the settings card (SettingsCard.qml)
+//   Middle-click  mute / unmute the speech bubble
 //
 //   omarchy-shell omabuddy say "hello"     make it say something
 //   omarchy-shell omabuddy mood proud      force a mood for a while
 //   omarchy-shell omabuddy poke
 //   omarchy-shell omabuddy celebrate firstPush  confetti, for testing
 //   omarchy-shell omabuddy set tone polite (see README for settings)
+//   omarchy-shell omabuddy settings        open or close the settings card
 //   omarchy-shell omabuddy state
 
 import Quickshell
@@ -24,6 +26,7 @@ import Quickshell.Wayland
 import QtQuick
 import QtQuick.Effects
 import qs.Commons
+import "Buddies.js" as Buddies
 import "Mood.js" as Mood
 import "Quips.js" as Quips
 
@@ -72,10 +75,12 @@ Item {
   // entry we last wrote stands in for the file until it comes back.
   property var writtenEntry: null
   readonly property var liveEntry: writtenEntry || pluginEntry
-  readonly property string corner: String(pluginEntry.corner || "bottom-right")
+  // Settings follow liveEntry, so a click on the settings card shows at once
+  // instead of after the shell.json round-trip.
+  readonly property string corner: String(liveEntry.corner || "bottom-right")
   readonly property int minSize: 8
   readonly property int maxSize: 48
-  readonly property int size: Math.min(maxSize, Math.max(minSize, Number(pluginEntry.size) || 14)) // face font size in px
+  readonly property int size: Math.min(maxSize, Math.max(minSize, Number(liveEntry.size) || 14)) // face font size in px
   // Wheel resizing previews instantly and persists once the wheel goes quiet.
   property int pendingSize: -1
   Timer {
@@ -88,14 +93,17 @@ Item {
     root.pendingSize = Math.min(root.maxSize, Math.max(root.minSize, from + delta))
     sizeCommit.restart()
   }
-  readonly property string tone: String(pluginEntry.tone || "snarky")
-  readonly property int chattiness: Math.max(1, Number(pluginEntry.chattiness) || 12) // minutes between unprompted lines
-  readonly property bool muted: pluginEntry.muted === true
-  readonly property string llm: String(pluginEntry.llm || "off")
-  readonly property string ollamaUrl: String(pluginEntry.ollamaUrl || "http://localhost:11434")
-  readonly property string ollamaModel: String(pluginEntry.ollamaModel || "llama3.2")
-  readonly property bool allowRemoteLlm: pluginEntry.allowRemoteLlm === true
-  readonly property int probeSeconds: Math.max(5, Number(pluginEntry.probeSeconds) || 20)
+  // Unknown names in shell.json fall back to the defaults rather than
+  // reaching the art or the quip tables.
+  readonly property string tone: Quips.toneIds().indexOf(String(liveEntry.tone)) !== -1 ? String(liveEntry.tone) : "snarky"
+  readonly property string buddyId: Buddies.ids().indexOf(String(liveEntry.buddy)) !== -1 ? String(liveEntry.buddy) : "blob"
+  readonly property int chattiness: Math.max(1, Number(liveEntry.chattiness) || 12) // minutes between unprompted lines
+  readonly property bool muted: liveEntry.muted === true
+  readonly property string llm: String(liveEntry.llm || "off")
+  readonly property string ollamaUrl: String(liveEntry.ollamaUrl || "http://localhost:11434")
+  readonly property string ollamaModel: String(liveEntry.ollamaModel || "llama3.2")
+  readonly property bool allowRemoteLlm: liveEntry.allowRemoteLlm === true
+  readonly property int probeSeconds: Math.max(5, Number(liveEntry.probeSeconds) || 20)
   // Bookkeeping the buddy writes itself: the day it first ran (for its
   // birthday costume) and today's achievement counters. See Mood.tally().
   readonly property string installedOn: String(liveEntry.installedOn || "")
@@ -189,12 +197,14 @@ Item {
     root.lastLineAt = Date.now()
     if (root.llm === "ollama" && !ollama.running) {
       ollama.moodForLine = mood
-      ollama.command = [root.scriptsDir + "/ollama.sh", root.ollamaUrl, root.ollamaModel, mood + " (" + root.tone + ")",
+      // The mood slot of the prompt also says who is talking and in what voice.
+      const persona = mood + " (you are " + Buddies.byId(root.buddyId).persona + "; your voice is " + Quips.tone(root.tone).persona + ")"
+      ollama.command = [root.scriptsDir + "/ollama.sh", root.ollamaUrl, root.ollamaModel, persona,
                         JSON.stringify(root.quipContext), root.allowRemoteLlm ? "remote-ok" : ""]
       ollama.running = true
       return
     }
-    root.say(Quips.pick(mood, root.quipContext, root.tone))
+    root.say(Quips.pick(mood, root.quipContext, root.tone, root.buddyId))
   }
 
   readonly property int maxLineLength: 280
@@ -230,6 +240,8 @@ Item {
       root.speak("grumpy", true)
       return
     }
+    // The cat doesn't always dignify a poke with a response. It still counts.
+    if (root.buddyId === "cat" && Math.random() < 0.25) { root.forceMood("ignoring", 2500); return }
     root.forceMood("poked", 4000)
     root.speak("poked", true)
   }
@@ -266,6 +278,31 @@ Item {
   }
   Timer { id: bubbleTimer; onTriggered: root.bubbleOpen = false }
   Timer { id: talkTimer; onTriggered: face.talking = false }
+
+  // ---------------------------------------------------------- settings card
+  // Right-click opens it beside the critter. Picks are heard straight away:
+  // a new buddy introduces itself, a new tone says a line in that voice. Both
+  // use canned lines even with Ollama on, so the preview is instant.
+  property bool cardOpen: false
+  readonly property bool buddyOnRight: root.corner.indexOf("right") !== -1
+  readonly property int cardOrigin: root.corner === "top-left" ? Item.TopLeft
+    : root.corner === "top-right" ? Item.TopRight
+    : root.corner === "bottom-left" ? Item.BottomLeft : Item.BottomRight
+  function openSettings() { root.cardOpen = true; root.ignoredMin = 0 }
+  function closeSettings() { root.cardOpen = false }
+
+  function switchBuddy(id) {
+    if (Buddies.ids().indexOf(id) === -1 || id === root.buddyId) return
+    root.updateSetting("buddy", id)
+    face.celebrate()
+    root.forceMood("greeting", 4000)
+    root.say(Quips.introduce(id, root.quipContext, root.tone))
+  }
+  function sampleTone(id) {
+    if (Quips.toneIds().indexOf(id) === -1) return
+    if (id !== root.tone) root.updateSetting("tone", id)
+    root.say(Quips.pick(root.mood, root.quipContext, id, ""))
+  }
 
   // --------------------------------------------------------------- sensors
   Process {
@@ -347,10 +384,10 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         const got = String(text || "").trim()
-        root.say(got ? got : Quips.pick(ollama.moodForLine, root.quipContext, root.tone))
+        root.say(got ? got : Quips.pick(ollama.moodForLine, root.quipContext, root.tone, root.buddyId))
       }
     }
-    onExited: function(code) { if (code !== 0) root.say(Quips.pick(ollama.moodForLine, root.quipContext, root.tone)) }
+    onExited: function(code) { if (code !== 0) root.say(Quips.pick(ollama.moodForLine, root.quipContext, root.tone, root.buddyId)) }
   }
 
   // ------------------------------------------------------------------- ipc
@@ -359,20 +396,26 @@ Item {
     function say(text: string): string { root.say(text); return "ok" }
     function poke(): string { root.poke(); return "ok" }
     function mood(name: string): string { root.forceMood(name, 20000); root.speak(name, true); return root.mood }
+    function settings(): string { root.cardOpen ? root.closeSettings() : root.openSettings(); return root.cardOpen ? "open" : "closed" }
     function state(): string {
-      return JSON.stringify({ mood: root.mood, reason: root.moodReason, tone: root.tone, streakMin: root.streakMin, muted: root.muted,
+      return JSON.stringify({ mood: root.mood, reason: root.moodReason, buddy: root.buddyId, tone: root.tone, streakMin: root.streakMin, muted: root.muted,
                               costume: root.costume.name, installedOn: root.installedOn, stats: root.stats, sensors: root.sensors })
     }
     function celebrate(name: string): string { root.celebrate(name || "firstPush"); return "ok" }
     function set(name: string, value: string): string {
-      const known = ["corner", "size", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "allowRemoteLlm", "probeSeconds"]
+      const known = ["corner", "size", "buddy", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "allowRemoteLlm", "probeSeconds"]
       if (known.indexOf(name) === -1) return "unknown setting: " + name + " (" + known.join(", ") + ")"
       let v = value
       if (name === "muted" || name === "allowRemoteLlm") v = value === "true"
       else if (name === "ollamaUrl" && !/^https?:\/\//.test(value)) return "ollamaUrl must start with http:// or https://"
       else if (name === "size") { v = Number(value); if (!(v >= root.minSize && v <= root.maxSize)) return "size must be " + root.minSize + " to " + root.maxSize }
       else if (name === "chattiness" || name === "probeSeconds") v = Number(value)
-      else if (name === "tone" && value !== "snarky" && value !== "polite") return "tone must be snarky or polite"
+      else if (name === "tone" && Quips.toneIds().indexOf(value) === -1) return "tone must be one of " + Quips.toneIds().join(", ")
+      else if (name === "buddy") {
+        if (Buddies.ids().indexOf(value) === -1) return "buddy must be one of " + Buddies.ids().join(", ")
+        root.switchBuddy(value)
+        return "ok"
+      }
       return root.updateSetting(name, v) ? "ok" : "unavailable"
     }
   }
@@ -383,7 +426,7 @@ Item {
       if (!root.installedOn && root.shellConfig) root.updateSetting("installedOn", root.today())
       root.costume = Mood.costume(new Date(), root.installedOn)
       if (root.costume.name === "birthday") root.celebrate("birthday")
-      else root.say(Quips.pick("greeting", root.quipContext, root.tone))
+      else root.say(Quips.pick("greeting", root.quipContext, root.tone, root.buddyId))
     })
   }
 
@@ -398,9 +441,25 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
     // Only the buddy takes input; the rest of the screen is click-through.
-    mask: Region { item: buddy }
+    // While the settings card is open the whole window takes clicks, so a
+    // click anywhere else closes the card (and goes no further).
+    mask: Region { item: root.cardOpen ? catcher : buddy }
 
     readonly property int margin: Style.gapsOut + Style.space(8)
+
+    MouseArea {
+      id: catcher
+      anchors.fill: parent
+      enabled: root.cardOpen
+      acceptedButtons: Qt.AllButtons
+      // Presses on the critter belong to the critter (a right-click there
+      // closes the card through its own handler).
+      onPressed: function(mouse) {
+        const p = mapToItem(buddy, mouse.x, mouse.y)
+        if (buddy.contains(p)) { mouse.accepted = false; return }
+        root.closeSettings()
+      }
+    }
 
     Item {
       id: buddy
@@ -436,6 +495,8 @@ Item {
         mouth: root.faceSpec.mouth
         extra: root.faceSpec.extra
         hat: root.costume.hat
+        buddy: root.buddyId
+        drowsy: root.mood === "sleepy" || root.mood === "zen" || root.mood === "monday"
         color: root.roleColor(root.faceSpec.role)
         bob: root.faceSpec.bob
         scale: drag.active ? 1.06 : (hover.hovered ? 1.03 : 1.0)
@@ -484,11 +545,31 @@ Item {
       }
       TapHandler {
         acceptedButtons: Qt.RightButton
+        onTapped: root.cardOpen ? root.closeSettings() : root.openSettings()
+      }
+      TapHandler {
+        acceptedButtons: Qt.MiddleButton
         onTapped: {
           root.updateSetting("muted", !root.muted)
-          root.say(root.muted ? "okay, talking again." : "zipping it. right-click to unzip.")
+          root.say(root.muted ? "okay, talking again." : "zipping it. middle-click to unzip.")
         }
       }
+    }
+
+    // Settings card: beside the critter, toward the middle of the screen,
+    // level with its feet at the bottom corners and its head at the top.
+    Loader {
+      id: card
+      active: root.cardOpen
+      z: 2
+      readonly property int gap: Style.space(10)
+      readonly property real w: item ? item.width : 0
+      readonly property real h: item ? item.height : 0
+      x: Math.max(panel.margin, Math.min(panel.width - w - panel.margin,
+           buddy.atRight ? buddy.x - w - gap : buddy.x + buddy.width + gap))
+      y: Math.max(panel.margin, Math.min(panel.height - h - panel.margin,
+           buddy.atBottom ? buddy.y + buddy.height - h : buddy.y))
+      sourceComponent: SettingsCard { host: root }
     }
 
     // Speech bubble: foreground on background, one sharp corner pointing at
@@ -496,7 +577,8 @@ Item {
     Rectangle {
       id: bubble
       visible: opacity > 0
-      opacity: root.bubbleOpen ? 1 : 0
+      // The card has its own preview bubble; this one waits until it closes.
+      opacity: root.bubbleOpen && !root.cardOpen ? 1 : 0
       Behavior on opacity { NumberAnimation { duration: 180 } }
 
       readonly property int maxWidth: Style.space(250)

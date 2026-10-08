@@ -31,9 +31,15 @@ It notices:
   friends. The buddy knows when an agent window is spinning, when it stops
   and wants you back, and when you are about to hit a rate limit.
 
-Everything it says comes from `Quips.js`, a plain list of one-liners in two
-voices, snarky and polite, that you can add to. If you run a local [Ollama](https://ollama.com/), it can improvise
-instead.
+It comes in four shapes, all made of block characters: the original **blob**,
+a **cat** that wags its tail when it's happy and ignores some of your pokes, a
+**ghost** that floats above its shadow and fades when it's sleepy, and a
+**bot** with a blinking antenna. Each one has a few lines of its own.
+
+Everything it says comes from `Quips.js`, a plain list of one-liners in four
+voices that you can add to: **snarky** (the default), **polite**, **cheerful**
+and **deadpan**. If you run a local [Ollama](https://ollama.com/), it can
+improvise instead.
 
 ## Install
 
@@ -54,7 +60,8 @@ omarchy restart shell
 | Click it | Pokes it. It says something. Five pokes in a minute and it sulks for 45 seconds. |
 | Drag it | Moves it. It snaps to the nearest corner and remembers. |
 | Scroll on it | Grows or shrinks it. The size is remembered. |
-| Right-click it | Mutes or unmutes the speech bubble. |
+| Right-click it | Opens the settings card: pick a buddy, a voice, how chatty it is, its size and corner, and whether Ollama writes its lines. Each pick takes effect straight away and the buddy says a line about it. Click anywhere else to close the card. |
+| Middle-click it | Mutes or unmutes the speech bubble. |
 
 From a terminal or a script:
 
@@ -64,7 +71,8 @@ omarchy-shell omabuddy poke
 omarchy-shell omabuddy mood proud       # any mood name from Mood.js, for 20 seconds
 omarchy-shell omabuddy celebrate tenCommits   # confetti plus that achievement's line
 omarchy-shell omabuddy state            # JSON of mood, streak, and sensors
-omarchy-shell omabuddy set <key> <value>   # e.g. set size 18, set tone polite
+omarchy-shell omabuddy set <key> <value>   # e.g. set buddy ghost, set tone deadpan
+omarchy-shell omabuddy settings         # open or close the settings card
 ```
 
 That `say` call is the hook point. Wire it into anything: a git post-commit
@@ -72,14 +80,17 @@ hook, a CI notifier, an Omarchy `theme-set` hook.
 
 ## Settings
 
-Set with `omarchy-shell omabuddy set <key> <value>`, or edit the plugin's
-entry in `~/.config/omarchy/shell.json`. Changes apply immediately.
+Right-click the buddy for the settings card, set a key with
+`omarchy-shell omabuddy set <key> <value>`, or edit the plugin's entry in
+`~/.config/omarchy/shell.json`. Changes apply immediately. The Ollama URL and
+model are text, so they stay on `set`: the card never takes keyboard focus.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `corner` | `bottom-right` | `top-left`, `top-right`, `bottom-left`, `bottom-right` |
 | `size` | `14` | Face font size in pixels, 8 to 48. Scrolling on the buddy sets this too. |
-| `tone` | `snarky` | `snarky` or `polite` |
+| `buddy` | `blob` | `blob`, `cat`, `ghost` or `bot` |
+| `tone` | `snarky` | `snarky`, `polite`, `cheerful` or `deadpan` |
 | `chattiness` | `12` | Minutes between unprompted lines |
 | `muted` | `false` | Hide the speech bubble |
 | `llm` | `off` | `ollama` to improvise lines with a local model |
@@ -105,12 +116,14 @@ Example entry:
 `full`, `unplugged`, `monday`, `friday`, `birthday`, `firstPush`, `tenCommits`,
 `calmWeek`. The rules live in `Mood.js`; the face for
 each mood is a handful of numbers in the same file, and the costume for the
-day is `Mood.costume()`.
+day is `Mood.costume()`. The critters themselves live in `Buddies.js`.
 
 ## Contributing lines
 
-Open `Quips.js`, find the mood, add a line. Keep it short, kind, and in the
-voice of a small creature who lives in a screen corner. Tokens `{repo}`,
+Open `Quips.js`, find the mood, add a line under the voice it belongs to.
+Keep it short, kind, and in the voice of a small creature who lives in a
+screen corner. Lines a particular critter would say (a cat, a ghost, a bot)
+go in `flavor` at the bottom of the file. Tokens `{repo}`,
 `{branch}`, `{dirty}`, `{hour}`, `{time}`, `{streak}`, `{battery}`, `{event}`, `{eta}`,
 `{agent}`, `{prompts}`, `{limit}`, `{windows}`, `{untracked}`, `{subject}`,
 `{fixes}`, `{commits}`, `{pushes}` and `{days}` are filled in.
@@ -143,10 +156,8 @@ order of how likely they are to happen:
   light it up.
 - **Notifications and system events.** Updates pending, disk nearly full,
   the theme changing under it.
-- **More faces and voices.** Extra moods, a per-theme colour override, and
-  packs of quips in other languages.
-- **A settings form.** Omarchy only renders settings UI for bar widgets today.
-  If that opens up for panels, size, corner, and tone move there.
+- **More critters and voices.** A fifth buddy, extra moods, a per-theme
+  colour override, and packs of quips in other languages.
 
 Ideas and quips are welcome as issues or pull requests. Keep it kind, keep
 it short, keep it useless. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
@@ -165,7 +176,9 @@ to follow.
   records. It runs git with hooks-free, config-safe flags so a freshly cloned
   repo cannot run code through its own `.git/config`.
 - Nothing leaves the machine unless you set `llm` to `ollama`. Then each quip
-  request posts a small JSON context to `ollamaUrl`. Exactly these fields:
+  request posts the mood plus the fixed descriptions of the chosen buddy and
+  voice (from `Buddies.js` and `Quips.js`), and a small JSON context, to
+  `ollamaUrl`. Exactly these context fields:
   repo name (not the path), branch, count of uncommitted changed lines, count
   of untracked files, the last commit's subject line, the fix-streak count,
   hour of day, day of week, the time as HH:MM, minutes of your current work
@@ -190,9 +203,12 @@ to follow.
   oversized record costs a bounded read, never a large allocation.
 - Every line it shows is rendered as plain text, never markup. That includes
   a commit subject quoted back at you.
-- The only things it writes are two keys in its own `shell.json` entry:
-  `installedOn` and the `stats` counters. It reads them back as untrusted
-  data like everything else.
+- On its own, it writes only two keys in its own `shell.json` entry:
+  `installedOn` and the `stats` counters. The settings card writes the keys
+  you click (`buddy`, `tone`, `chattiness`, `muted`, `size`, `corner`, `llm`),
+  and nothing else. Everything is read back as untrusted data: an unknown
+  `buddy` or `tone` falls back to the default, never into the art or the
+  quip tables.
 - These are rules, not accidents. [CONTRIBUTING.md](CONTRIBUTING.md) spells
   out what a change may read and send, and how to report a vulnerability.
 

@@ -1,10 +1,12 @@
 // Omabuddy's face, after the Claude Design "Omarchy Companion" canvas: a
 // block-character critter in the shell's monospace font, glowing in a theme
 // colour, standing on a little shadow. The parent hands in a face spec from
-// Mood.face(): eyes, mouth, an optional extra mark by the head, and a colour.
+// Mood.face(): eyes, mouth, an optional extra mark by the head, and a colour,
+// plus which critter from Buddies.js to draw it on.
 import QtQuick
 import QtQuick.Effects
 import qs.Commons
+import "Buddies.js" as Buddies
 
 Item {
   id: face
@@ -17,12 +19,22 @@ Item {
   property int bob: 1800        // bounce period ms, 0 = still
   property bool talking: false
   property real pixelSize: 14
+  property string buddy: "blob"
+  property bool fidget: true    // the critter's own little animation (tail, hem, antenna)
+  property bool drowsy: false   // sleepy moods: a ghost goes see-through
+
+  readonly property var kind: Buddies.byId(buddy)
 
   implicitWidth: label.implicitWidth + pixelSize * 2
-  implicitHeight: label.implicitHeight + pixelSize * 0.9
+  implicitHeight: label.implicitHeight + pixelSize * 0.9 + lift
 
-  function art(eyes, mouth, extra, hat) {
-    return (hat ? hat + "\n" : "") + "   ▄▄▄▄▄▄▄▄\n  █ " + eyes + " █" + (extra || "") + "\n  █        █\n  █   " + mouth + "   █\n   ▀▀▀▀▀▀▀▀\n    ▀▀  ▀▀"
+  // Fidget: flips faster when the mood bounces faster, so a happy cat wags.
+  property bool tick: false
+  Timer {
+    interval: face.bob > 0 && face.bob < 700 ? 260 : 700
+    running: face.fidget && face.buddy !== "blob"; repeat: true
+    onTriggered: face.tick = !face.tick
+    onRunningChanged: if (!running) face.tick = false
   }
 
   // Blink: eyes flatten for a beat every few seconds.
@@ -44,7 +56,7 @@ Item {
 
   readonly property string shownEyes: blinking ? "–    –" : eyes
   readonly property string shownMouth: mouthOpen ? "○ " : mouth
-  readonly property string text: art(shownEyes, shownMouth, extra, hat)
+  readonly property string text: Buddies.draw(buddy, { eyes: shownEyes, mouth: shownMouth, extra: extra || "", hat: hat, tick: tick })
 
   // Confetti: a handful of block glyphs burst from the head and fade. The
   // parent calls celebrate(); nothing here persists.
@@ -81,26 +93,30 @@ Item {
 
   Behavior on color { ColorAnimation { duration: 400 } }
 
-  // Idle bob: gentle vertical breathing, faster when excited.
+  // Idle bob: gentle vertical breathing, faster when excited. Floaty critters
+  // hover a little above their shadow and drift further.
+  readonly property real lift: kind.floaty ? pixelSize * 0.6 : 0
+  property real ghostly: kind.floaty ? (drowsy ? 0.45 : 0.85) : 1
+  Behavior on ghostly { NumberAnimation { duration: 900 } }
   property real bobY: 0
   SequentialAnimation on bobY {
     running: face.bob > 0
     loops: Animation.Infinite
-    NumberAnimation { to: -face.pixelSize * 0.25; duration: Math.max(150, face.bob / 2); easing.type: Easing.InOutSine }
+    NumberAnimation { to: -face.pixelSize * (face.kind.floaty ? 0.5 : 0.25); duration: Math.max(150, face.bob / 2); easing.type: Easing.InOutSine }
     NumberAnimation { to: 0; duration: Math.max(150, face.bob / 2); easing.type: Easing.InOutSine }
   }
 
   // Ground shadow: shrinks a touch as the body lifts.
   Rectangle {
     id: shadow
-    width: face.pixelSize * 4.6
+    width: face.pixelSize * (face.kind.floaty ? 3.4 : 4.6)
     height: face.pixelSize * 0.42
     radius: height / 2
-    color: Qt.rgba(0, 0, 0, 0.6)
+    color: Qt.rgba(0, 0, 0, face.kind.floaty ? 0.35 : 0.6)
     anchors.horizontalCenter: label.horizontalCenter
     anchors.horizontalCenterOffset: face.pixelSize * 0.2
-    y: label.y + label.height - face.pixelSize * 0.15
-    scale: 1 + face.bobY / (face.pixelSize * 2)
+    y: label.y + label.height - face.pixelSize * 0.15 + face.lift - (face.kind.floaty ? face.bobY : 0)
+    scale: 1 + face.bobY / (face.pixelSize * (face.kind.floaty ? 1.2 : 2))
   }
 
   // Glow: a blurred copy of the text behind the crisp one.
@@ -125,7 +141,7 @@ Item {
     blurMax: 48
     blur: 1.0
     brightness: 0.2
-    opacity: 0.85
+    opacity: 0.85 * face.ghostly
   }
 
   Text {
@@ -142,5 +158,6 @@ Item {
     lineHeight: 0.94
     textFormat: Text.PlainText
     renderType: Text.NativeRendering
+    opacity: face.ghostly
   }
 }
