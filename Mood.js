@@ -99,6 +99,30 @@ function events(prev, next) {
   return out
 }
 
+// Events other programs may report over IPC (`omarchy-shell omabuddy event
+// <name>`): shell and Claude Code hooks, Omarchy hooks, test runners. Only
+// these names are accepted and an event carries nothing but its name, so a
+// caller can't put text in the bubble or the Ollama prompt this way. `mood`
+// is what the buddy feels ("" for none); `kick` runs the probe right away so
+// whatever it measures (a new commit, the battery) shows up without waiting.
+var externalEvents = {
+  gitChanged:      { mood: "",                kick: true },
+  passed:          { mood: "passed",          kick: false },
+  failed:          { mood: "failed",          kick: false },
+  commandFailed:   { mood: "commandFailed",   kick: false },
+  longCommandDone: { mood: "longCommandDone", kick: false },
+  agentDone:       { mood: "agentDone",       kick: false },
+  agentWaiting:    { mood: "agentWaiting",    kick: false },
+  themeChanged:    { mood: "themeChanged",    kick: false },
+  fontChanged:     { mood: "fontChanged",     kick: false },
+  updated:         { mood: "updated",         kick: false },
+  batteryLow:      { mood: "panic",           kick: true }
+}
+
+function externalEvent(name) {
+  return typeof name === "string" && Object.prototype.hasOwnProperty.call(externalEvents, name) ? externalEvents[name] : null
+}
+
 // Costume for the day: a hat line drawn above the head, or "" for none.
 // `installedOn` is the YYYY-MM-DD the plugin first ran, for its birthday.
 function costume(date, installedOn) {
@@ -152,6 +176,8 @@ function face(mood) {
     case "worried":   return { eyes: "◉    ◉", mouth: "▂▂", extra: "",   role: "red",    bob: 1400 }
     case "meeting":   return { eyes: "◉    ◦", mouth: "○ ", extra: "",   role: "yellow", bob: 500 }
     case "proud":
+    case "passed":
+    case "updated":
     case "shipped":   return { eyes: "◠    ◠", mouth: "▽ ", extra: "",   role: "green",  bob: 500 }
     case "cooking":   return { eyes: "◦    ◉", mouth: "~ ", extra: " …", role: "cyan",   bob: 2200 }
     case "grabbed":   return { eyes: "◉    ◉", mouth: "▂▂", extra: " !", role: "red",    bob: 0 }
@@ -164,6 +190,7 @@ function face(mood) {
     case "stretch":   return { eyes: "–    –", mouth: "▁▁", extra: "",   role: "yellow", bob: 1600 }
     case "sweaty":    return { eyes: "◉    ◉", mouth: "~ ", extra: " ▪", role: "red",    bob: 350 }
     case "rationed":  return { eyes: "◉    ◦", mouth: "▂▂", extra: "",   role: "red",    bob: 1400 }
+    case "longCommandDone":
     case "agentDone": return { eyes: "◉    ◉", mouth: "▽ ", extra: " !", role: "cyan",   bob: 500 }
     case "greeting":
     case "welcomeBack": return { eyes: "◠    ◠", mouth: "▁▁", extra: "",   role: "accent", bob: 900 }
@@ -173,6 +200,7 @@ function face(mood) {
     case "grumpy":    return { eyes: "▀    ▀", mouth: "▂▂", extra: "",   role: "muted",  bob: 0 }
     case "ignoring":  return { eyes: "◦    ◦", mouth: "▁▁", extra: " …", role: "muted",  bob: 0 }
     case "fixStreak":
+    case "commandFailed":
     case "wipCommit":
     case "longSubject":
     case "emojiCommit": return { eyes: "◉    ▀", mouth: "▂▂", extra: "",   role: "yellow", bob: 1400 }
@@ -186,6 +214,21 @@ function face(mood) {
     case "firstPush":
     case "tenCommits":
     case "calmWeek":  return { eyes: "◠    ◠", mouth: "▽ ", extra: " ✦", role: "accent", bob: 400 }
+    case "thinking":  return { eyes: "◦    ◦", mouth: "~ ", extra: " …", role: "cyan",   bob: 2200 }
+    case "askBusy":
+    case "asked":     return { eyes: "◠    ◠", mouth: "▁▁", extra: "",   role: "accent", bob: 900 }
+    case "failed":    return { eyes: "◉    ◉", mouth: "▂▂", extra: " ▪", role: "red",    bob: 900 }
+    case "agentWaiting": return { eyes: "◉    ◉", mouth: "○ ", extra: " ?", role: "cyan",   bob: 600 }
+    case "themeChanged":
+    case "fontChanged": return { eyes: "◠    ◠", mouth: "○ ", extra: " ✦", role: "accent", bob: 700 }
+    case "restless":  return { eyes: "◉    ◦", mouth: "~ ", extra: " ?", role: "yellow", bob: 350 }
+    case "speakerMuted": return { eyes: "–    –", mouth: "▁▁", extra: " …", role: "muted",  bob: 0 }
+    case "loud":      return { eyes: "◉    ◉", mouth: "○ ", extra: " !", role: "red",    bob: 250 }
+    case "offline":   return { eyes: "◉    ◦", mouth: "▂▂", extra: " ?", role: "muted",  bob: 1400 }
+    case "online":    return { eyes: "◠    ◠", mouth: "▁▁", extra: "",   role: "green",  bob: 900 }
+    case "bluetooth": return { eyes: "◠    ◠", mouth: "▽ ", extra: "",   role: "cyan",   bob: 700 }
+    case "music":     return { eyes: "◠    ◠", mouth: "‿ ", extra: " ♪", role: "accent", bob: 450 }
+    case "onRepeat":  return { eyes: "–    –", mouth: "‿ ", extra: " ♪♪", role: "accent", bob: 450 }
     default:          return { eyes: "◉    ◉", mouth: "▁▁", extra: "",   role: "accent", bob: 1800 }
   }
 }

@@ -6,7 +6,7 @@
 // that it says in any voice, now and then, instead of the tone's line.
 // Tokens: {repo} {branch} {dirty} {hour} {streak} {battery} {event} {eta}
 // {agent} {prompts} {limit} {windows} {untracked} {subject} {fixes} {commits}
-// {pushes} {days} {time}.
+// {pushes} {days} {time}, and {track} {artist} while the music sense is on.
 .pragma library
 
 // The voices, in the order the settings card shows them. `persona` is what
@@ -742,6 +742,120 @@ var lines = {
       "ten commits. someone's busy."
     ]
   },
+  thinking: {
+    snarky: ["hold on. thinking. it happens.", "one sec. consulting my single brain cell."],
+    polite: ["let me think about that.", "one moment, please."],
+    cheerful: ["ooh, good one! thinking!", "brain spinning up!"],
+    deadpan: ["processing.", "thinking. please hold."]
+  },
+  asked: {
+    snarky: ["i only know canned lines. turn on ollama and i'll pretend to have opinions.", "great question. i only do canned lines. next."],
+    polite: ["i can't really answer without ollama, but i heard you.", "noted. i'm better at reacting than answering."],
+    cheerful: ["i heard you! give me ollama and i'll chat all day!", "love that you asked! i only have canned lines though."],
+    deadpan: ["i have no brain configured. ask again with ollama.", "question received. answer not found."]
+  },
+  askBusy: {
+    snarky: ["my brain's busy. ask again in a minute.", "ollama isn't answering. i'm choosing to believe it's thinking."],
+    polite: ["sorry, i couldn't come up with an answer just now. try again soon?", "my brain needs a moment. ask me again?"],
+    cheerful: ["brain's on a coffee break! ask me again soon!", "ooh, stumped for now! try me again in a bit!"],
+    deadpan: ["no answer available. try later.", "the brain is occupied."]
+  },
+  passed: {
+    snarky: ["green. don't touch anything.", "it passed. i'm as surprised as you.", "all green. screenshot it for the doubters."],
+    polite: ["everything passed. nicely done.", "green across the board."],
+    cheerful: ["all green! you're unstoppable!", "it passed!! victory lap!"],
+    deadpan: ["passed. suspicious, but passed.", "green. moving on."]
+  },
+  failed: {
+    snarky: ["red. it's always the thing you didn't change.", "failed. the computer is never wrong. sadly.", "that's a no from the tests."],
+    polite: ["something failed. take a breath, it's probably small.", "a red one. you've fixed worse."],
+    cheerful: ["red just means there's a puzzle! you got this!", "failure is data! you love data!"],
+    deadpan: ["failed.", "red. as foretold."]
+  },
+  commandFailed: {
+    snarky: ["that command had other plans.", "non-zero exit. bold choice.", "the shell said no. respect the shell."],
+    polite: ["that one didn't work. maybe a typo?", "the last command failed. no rush."],
+    cheerful: ["oops! next try's the one!", "so close! try again!"],
+    deadpan: ["exit status: disappointing.", "it failed. the terminal remembers."]
+  },
+  longCommandDone: {
+    snarky: ["it finished. you can stop staring now.", "done. that took a while. so did you."],
+    polite: ["your long command finished.", "that's done, whenever you're ready."],
+    cheerful: ["it's done!! the wait is over!", "finished! patience rewarded!"],
+    deadpan: ["it ended. eventually.", "done. time passed."]
+  },
+  agentWaiting: {
+    snarky: ["{agent} wants a word. probably permission.", "the agent is waiting on you. role reversal."],
+    polite: ["{agent} is waiting for you.", "an agent needs your input."],
+    cheerful: ["{agent} needs you! you're the boss!", "your agent's asking for you!"],
+    deadpan: ["{agent} awaits instructions.", "the machine requires a human."]
+  },
+  themeChanged: {
+    snarky: ["new theme. i'm wearing it whether i like it or not.", "redecorating again? fine. i look great."],
+    polite: ["new colors. they suit us.", "nice theme."],
+    cheerful: ["ooh, new outfit! how do i look?!", "new theme! fresh start!"],
+    deadpan: ["the colors changed. so did i.", "new theme. same corner."]
+  },
+  fontChanged: {
+    snarky: ["new font. my face is technically different now.", "you changed my bones. new font."],
+    polite: ["a new font. it reads nicely.", "fresh letters."],
+    cheerful: ["new font! i feel brand new!", "look at these letters! gorgeous!"],
+    deadpan: ["font changed. i am made of it.", "new glyphs. same me."]
+  },
+  updated: {
+    snarky: ["system updated. nothing's broken. yet.", "fresh packages. let's see what moved."],
+    polite: ["the update finished. all set.", "you're up to date."],
+    cheerful: ["updated! shiny new everything!", "all fresh! nice!"],
+    deadpan: ["updated. the numbers went up.", "packages changed. i did not."]
+  },
+  restless: {
+    snarky: ["that's a lot of workspaces. looking for something?", "workspace tour, huh. i'll wait here."],
+    polite: ["lots of switching. lost something?", "you're moving around a lot."],
+    cheerful: ["so many workspaces! you're everywhere!", "zoom zoom! busy bee!"],
+    deadpan: ["switching. switching. switching.", "you have visited every workspace. twice."]
+  },
+  speakerMuted: {
+    snarky: ["muted. finally, some peace.", "silence. i'll keep the commentary visual."],
+    polite: ["sound's off.", "quiet mode, got it."],
+    cheerful: ["shh! secret mode!", "muted! cozy!"],
+    deadpan: ["sound: none.", "muted."]
+  },
+  loud: {
+    snarky: ["volume at max. your neighbors say hi.", "that's loud. i felt that in my pixels."],
+    polite: ["that's quite loud. careful with your ears.", "volume is all the way up."],
+    cheerful: ["turn it up!! wait, maybe not that much!", "loud and proud!"],
+    deadpan: ["volume: maximum. ears: optional.", "loud."]
+  },
+  offline: {
+    snarky: ["internet's gone. time to read the docs you saved. you didn't.", "offline. just us now."],
+    polite: ["you're offline. i'll wait with you.", "the network dropped."],
+    cheerful: ["offline adventure! just you and me!", "no internet! focus mode!"],
+    deadpan: ["the internet left.", "offline. as were our ancestors."]
+  },
+  online: {
+    snarky: ["back online. the internet missed you. probably.", "network's back. resume refreshing things."],
+    polite: ["you're back online.", "connection restored."],
+    cheerful: ["we're back!! hello internet!", "online again! yay!"],
+    deadpan: ["online. the tubes are full again.", "connected."]
+  },
+  bluetooth: {
+    snarky: ["something connected. hopefully yours.", "bluetooth worked first try. mark the calendar."],
+    polite: ["a bluetooth device connected.", "connected. ready when you are."],
+    cheerful: ["new friend connected!", "bluetooth worked! miracles happen!"],
+    deadpan: ["a device has joined.", "bluetooth: functional. today."]
+  },
+  music: {
+    snarky: ["{track}? bold.", "ah, {artist}. i'll allow it.", "now playing: {track}. i'm reviewing it."],
+    polite: ["{track}, nice pick.", "playing {artist}. lovely."],
+    cheerful: ["{track}! great song!", "{artist}!! i'm bopping!"],
+    deadpan: ["{track}. noted.", "{artist}. acceptable."]
+  },
+  onRepeat: {
+    snarky: ["{track} again. it's a lifestyle now.", "third time on {track}. are you okay?"],
+    polite: ["you really like {track}.", "{track} on repeat. fair enough."],
+    cheerful: ["{track} again!! it IS that good!", "on repeat! a classic!"],
+    deadpan: ["{track}. again. again.", "the loop continues."]
+  },
   calmWeek: {
     snarky: [
       "a whole week without a battery panic. i'm oddly proud.",
@@ -775,7 +889,9 @@ var flavor = {
     sleepy: ["nap o'clock. it's always nap o'clock.", "curling up. wake me for treats."],
     welcomeBack: ["oh. you're back. i wasn't waiting by the door. at all."],
     plugged: ["ah. the warm cable. purrr."],
-    shipped: ["you pushed it off the table. i respect that."]
+    shipped: ["you pushed it off the table. i respect that."],
+    music: ["{track}. i'll nap to it.", "this one has good purring range."],
+    loud: ["my ears are folded flat. turn it down."]
   },
   ghost: {
     greeting: ["boo. sorry. habit.", "i've haunted worse corners."],
@@ -786,7 +902,9 @@ var flavor = {
     worried: ["{dirty} uncommitted lines. i've seen how this ends. i died like this."],
     sleepy: ["even ghosts rest. not in peace, but they rest."],
     panic: ["{battery}%. if the screen goes dark, am i a ghost of a ghost?"],
-    wipCommit: ["\"wip\". the commit message of the restless dead."]
+    wipCommit: ["\"wip\". the commit message of the restless dead."],
+    offline: ["no signal. finally, the afterlife experience."],
+    failed: ["another test has passed on. to the other side."]
   },
   bot: {
     greeting: ["boot sequence complete. hello, operator.", "systems nominal. personality module loaded."],

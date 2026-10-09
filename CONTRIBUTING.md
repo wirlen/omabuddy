@@ -52,6 +52,18 @@ These rules apply to every change, however small:
   pipes and the environment: jq reads `env.NAME` rather than `--arg`, curl
   takes its body with `--data-binary @-`, and git runs from inside the repo
   (`gin`) rather than with `-C <path>`.
+- **Events are names, never text.** `omarchy-shell omabuddy event` only
+  accepts names from `Mood.externalEvents`. A new event is a new entry there
+  (plus a face and quips), never a parameter. Hooks in `hooks/` send that
+  name and nothing else, read no stdin, and run the CLI in the background
+  with `-q`, so they can't slow down or fail their caller.
+- **Senses are opt-in.** A new sense in `Senses.qml` sits behind a setting
+  that defaults to off, reads nothing while off, compares event names rather
+  than copying event data, and clips any string it keeps (64 characters).
+- **Ration the voice.** Everything that isn't a direct user action goes
+  through `speak(mood, false)`, so the 8 s gate, the 90 s same-mood dedupe
+  and the Ollama budget (`llmCooldown`, `llmPerHour`) apply. Don't call
+  `say()` or start the ollama process from a new trigger directly.
 - **No new daemons, no new packages, no network listeners.** If a feature
   needs one, it probably belongs in a separate project the plugin can talk to.
 - **No secrets in settings.** Settings live in `shell.json` in plain text.

@@ -1,8 +1,9 @@
 // The buddy's own settings card. Omarchy draws settings forms only for bar
 // widgets, so the panel draws this one itself, next to the critter, inside
-// its own layer window. Mouse only: the window never takes keyboard focus, so
-// the card can't steal typing from whatever you're working in. Free-text
-// settings (the Ollama URL and model) stay on `omarchy-shell omabuddy set`.
+// its own layer window. Mouse only: the card never takes keyboard focus, so
+// it can't steal typing from whatever you're working in. Free-text settings
+// (the Ollama URL and model) stay on `omarchy-shell omabuddy set`; "ask me
+// something" closes the card and opens the ask box, which does take focus.
 //
 // `host` is Buddy.qml's root. Every control writes through host.updateSetting,
 // so the card and `set` land in the same shell.json entry.
@@ -46,6 +47,38 @@ BorderSurface {
     interval: 20000
     running: !cardHover.hovered
     onTriggered: card.host.closeSettings()
+  }
+
+  // A label with a switch on the right, one row per boolean setting.
+  component SwitchRow: Item {
+    id: switchRow
+    required property string label
+    required property bool checked
+    signal toggled()
+    width: card.inner
+    height: Math.max(switchLabel.implicitHeight, switchControl.implicitHeight)
+    Text {
+      id: switchLabel
+      anchors.left: parent.left
+      anchors.right: switchControl.left
+      anchors.rightMargin: card.gap
+      anchors.verticalCenter: parent.verticalCenter
+      text: switchRow.label
+      textFormat: Text.PlainText
+      elide: Text.ElideRight
+      color: Color.popups.text
+      font.family: Style.font.family
+      font.pixelSize: Style.font.body
+    }
+    ToggleSwitch {
+      id: switchControl
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      cursorRing: false
+      trackHeight: Math.max(14, Math.round(Style.spacing.controlHeight * 0.5))
+      checked: switchRow.checked
+      onToggled: switchRow.toggled()
+    }
   }
 
   component Caption: Text {
@@ -245,17 +278,54 @@ BorderSurface {
 
     // ------------------------------------------------------------- brain
     PanelSectionHeader { text: "brain" }
-    ButtonGroup {
-      focusable: false
-      spacing: Style.spacing.sm
-      options: [{ value: "off", label: "canned lines" }, { value: "ollama", label: "ollama" }]
-      value: card.host.llm === "ollama" ? "ollama" : "off"
-      onChanged: function(v) { card.host.updateSetting("llm", v) }
+    Item {
+      width: card.inner
+      height: Math.max(brainGroup.implicitHeight, askButton.implicitHeight)
+      ButtonGroup {
+        id: brainGroup
+        anchors.verticalCenter: parent.verticalCenter
+        focusable: false
+        spacing: Style.spacing.sm
+        options: [{ value: "off", label: "canned lines" }, { value: "ollama", label: "ollama" }]
+        value: card.host.llm === "ollama" ? "ollama" : "off"
+        onChanged: function(v) { card.host.updateSetting("llm", v) }
+      }
+      Button {
+        id: askButton
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        bordered: true
+        text: "ask me something"
+        onClicked: card.host.openAsk()
+      }
     }
     Caption {
       text: card.host.llm === "ollama"
         ? "improvises with " + card.host.ollamaModel + " at " + card.host.ollamaUrl + ". change with omarchy-shell omabuddy set."
         : "only what's in Quips.js. nothing leaves the machine."
+    }
+
+    // ------------------------------------------------------------ senses
+    PanelSectionHeader { text: "senses" }
+    SwitchRow {
+      label: "desktop: workspaces, new windows, fullscreen"
+      checked: card.host.senseDesktop
+      onToggled: card.host.updateSetting("senseDesktop", !card.host.senseDesktop)
+    }
+    SwitchRow {
+      label: "devices: speaker, network, bluetooth"
+      checked: card.host.senseDevices
+      onToggled: card.host.updateSetting("senseDevices", !card.host.senseDevices)
+    }
+    SwitchRow {
+      label: "music: what's playing"
+      checked: card.host.senseMusic
+      onToggled: card.host.updateSetting("senseMusic", !card.host.senseMusic)
+    }
+    Caption {
+      text: card.host.senseMusic && card.host.llm === "ollama"
+        ? "track and artist go to ollama with each line."
+        : "off by default. each one only reads while it's on."
     }
 
     // ----------------------------------------------------------- preview

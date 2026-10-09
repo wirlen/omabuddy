@@ -2,9 +2,10 @@
 //
 // A fullscreen transparent layer window on the Top layer, input-masked to the
 // buddy itself so every other pixel passes clicks through to whatever is
-// underneath. The buddy watches the world through scripts/probe.sh, decides a
-// mood in Mood.js, and speaks lines from Quips.js (or, opted in, from a local
-// Ollama).
+// underneath. The buddy watches the world through scripts/probe.sh (and, opted
+// in, the senses in Senses.qml), decides a mood in Mood.js, and speaks lines
+// from Quips.js (or, opted in, from a local Ollama). Every line goes through
+// speak(), which rations both the talking and the Ollama calls.
 //
 //   Click         poke it
 //   Drag          move it; it snaps to the nearest corner and remembers
@@ -13,6 +14,9 @@
 //   Middle-click  mute / unmute the speech bubble
 //
 //   omarchy-shell omabuddy say "hello"     make it say something
+//   omarchy-shell omabuddy ask "how's it going?"  ask it (Ollama answers)
+//   omarchy-shell omabuddy listen          open a text box to ask it something
+//   omarchy-shell omabuddy event passed    report an event (see Mood.externalEvents)
 //   omarchy-shell omabuddy mood proud      force a mood for a while
 //   omarchy-shell omabuddy poke
 //   omarchy-shell omabuddy celebrate firstPush  confetti, for testing
@@ -174,6 +178,13 @@ Item {
   function validModel(v) { return typeof v === "string" && /^[A-Za-z0-9._:\/-]{1,128}$/.test(v) }
   readonly property bool allowRemoteLlm: liveEntry.allowRemoteLlm === true
   readonly property int probeSeconds: Math.min(3600, Math.max(5, Number(liveEntry.probeSeconds) || 20))
+  // Ollama budget: seconds between improvised lines, and calls per hour.
+  readonly property int llmCooldown: Math.min(600, Math.max(5, Number(liveEntry.llmCooldown) || 30))
+  readonly property int llmPerHour: Math.min(240, Math.max(1, Number(liveEntry.llmPerHour) || 40))
+  // Optional senses (Senses.qml), all off unless switched on.
+  readonly property bool senseDesktop: liveEntry.senseDesktop === true
+  readonly property bool senseDevices: liveEntry.senseDevices === true
+  readonly property bool senseMusic: liveEntry.senseMusic === true
   // Bookkeeping the buddy writes itself: the day it first ran (for its
   // birthday costume) and today's achievement counters. See Mood.tally().
   readonly property string installedOn: /^\d{4}-\d{2}-\d{2}$/.test(String(liveEntry.installedOn)) ? String(liveEntry.installedOn) : ""
@@ -239,39 +250,106 @@ Item {
     eta: sensors && sensors.calendar ? sensors.calendar.eta : "",
     agent: Mood.busiestAgent(sensors) ? Mood.busiestAgent(sensors).name : "the agent",
     prompts: Mood.busiestAgent(sensors) ? Mood.busiestAgent(sensors).prompts : 0,
-    limit: Mood.tightestAgent(sensors) ? Math.round(Mood.tightestAgent(sensors).limit * 100) : 0
+    limit: Mood.tightestAgent(sensors) ? Math.round(Mood.tightestAgent(sensors).limit * 100) : 0,
+    // Only while the music sense is on; Senses.qml clips both.
+    track: root.senseMusic ? senses.track : "", artist: root.senseMusic ? senses.artist : ""
   })
 
-  function recompute() {
+  // `quiet` is for forceMood(): its caller says the line itself, so the
+  // mood swing must not speak a second one.
+  function recompute(quiet) {
     const decided = Mood.decide(root.sensors, { streakMin: root.streakMin, ignoredMin: root.ignoredMin })
     const next = root.forcedMood || decided.mood
     root.moodReason = root.forcedMood ? "forced" : decided.reason
     if (next !== root.mood) {
       root.mood = next
       // A mood swing is worth a word, but only if we've been quiet a while.
-      if (Date.now() - root.lastLineAt > 60 * 1000) root.speak(next, false)
+      if (!quiet && Date.now() - root.lastLineAt > 60 * 1000) root.speak(next, false)
     }
   }
 
-  function speak(mood, force) {
+  // The voice gate. Lines you caused (a poke, a grab, `mood`) always get
+  // through; everything else (the probe, senses, hooks, the chatter timer) is
+  // dropped while a fullscreen window has focus, within 8 s of the last line,
+  // or when the same mood spoke in the last 90 s. The face still changes.
+  // A `milestone` (an achievement right after the line that earned it) skips
+  // the 8 s and 90 s rules but still respects mute and fullscreen.
+  property var saidAt: ({})
+  function speak(mood, force, milestone) {
     if (root.muted && !force) return
-    root.lastLineAt = Date.now()
-    if (root.llm === "ollama" && !ollama.running) {
-      ollama.moodForLine = mood
-      // The mood slot of the prompt also says who is talking and in what
-      // voice. Mood and context describe your repo and calendar, so they go
-      // in the environment (readable only by you), never on the command
-      // line. ollama.sh refuses both above these sizes; so does this side.
-      const persona = mood + " (you are " + Buddies.byId(root.buddyId).persona + "; your voice is " + Quips.tone(root.tone).persona + ")"
-      const ctx = JSON.stringify(root.quipContext)
-      if (persona.length <= 512 && ctx.length <= 8192) {
-        ollama.environment = ({ OMABUDDY_URL: root.ollamaUrl, OMABUDDY_MODEL: root.ollamaModel, OMABUDDY_MOOD: persona, OMABUDDY_CTX: ctx })
-        ollama.command = ["timeout", "-k", "2", "20", root.scriptsDir + "/ollama.sh", root.allowRemoteLlm ? "remote-ok" : ""]
-        ollama.running = true
-        return
-      }
-    }
+    const now = Date.now()
+    if (!force && root.hushed) return
+    if (!force && !milestone && (now - root.lastLineAt < 8000 || now - (root.saidAt[mood] || 0) < 90000)) return
+    root.lastLineAt = now
+    root.saidAt[mood] = now
+    if (root.llmBudget(false) && root.improvise(mood, mood, "")) return
     root.say(Quips.pick(mood, root.quipContext, root.tone, root.buddyId))
+  }
+
+  // The Ollama budget: one request at a time, llmCooldown seconds between
+  // improvised lines, and at most llmPerHour calls in any hour. An ask skips
+  // the cooldown, never the rest. Over budget, the canned line is used; no
+  // request is ever queued. llmCalls never holds more than llmPerHour (240).
+  property var llmCalls: []
+  function llmLastHour() {
+    const now = Date.now()
+    return root.llmCalls.filter(function(t) { return now - t < 3600 * 1000 })
+  }
+  function llmBudget(isAsk) {
+    if (root.llm !== "ollama" || ollama.running) return false
+    const now = Date.now()
+    root.llmCalls = root.llmLastHour()
+    if (root.llmCalls.length >= root.llmPerHour) return false
+    const last = root.llmCalls.length ? root.llmCalls[root.llmCalls.length - 1] : 0
+    return isAsk || now - last >= root.llmCooldown * 1000
+  }
+  // `mood` goes in the prompt, `fallback` is the quip mood used if Ollama has
+  // nothing, `asked` is what you typed ("" to improvise).
+  function improvise(mood, fallback, asked) {
+    // The mood slot of the prompt also says who is talking and in what
+    // voice. Mood, context and your question describe your repo and calendar,
+    // so they go in the environment (readable only by you), never on the
+    // command line. ollama.sh refuses all three above these sizes (in bytes,
+    // up to three per unit counted here); so does this side.
+    const persona = mood + " (you are " + Buddies.byId(root.buddyId).persona + "; your voice is " + Quips.tone(root.tone).persona + ")"
+    const ctx = JSON.stringify(root.quipContext)
+    if (persona.length > 512 || ctx.length > 8192 || asked.length > root.askMaxLength) return false
+    ollama.moodForLine = fallback
+    ollama.asking = asked !== ""
+    ollama.environment = ({ OMABUDDY_URL: root.ollamaUrl, OMABUDDY_MODEL: root.ollamaModel, OMABUDDY_MOOD: persona, OMABUDDY_CTX: ctx, OMABUDDY_ASK: asked })
+    ollama.command = ["timeout", "-k", "2", "20", root.scriptsDir + "/ollama.sh", root.allowRemoteLlm ? "remote-ok" : ""]
+    root.llmCalls = root.llmCalls.concat([Date.now()])
+    ollama.running = true
+    return true
+  }
+
+  // Asking: what you type in the ask box or send with `ask`. Control
+  // characters become spaces and the text is clipped to askMaxLength before
+  // anything else looks at it. Without Ollama the buddy answers with a canned
+  // `asked` line; with Ollama busy, over budget or failing, an `askBusy` one.
+  readonly property int askMaxLength: 280
+  function ask(text) {
+    const clean = String(text || "").slice(0, root.askMaxLength * 4).replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, root.askMaxLength)
+    if (!clean) return "nothing to ask"
+    root.ignoredMin = 0
+    root.lastLineAt = Date.now()
+    const fallback = root.llm === "ollama" ? "askBusy" : "asked"
+    if (root.llmBudget(true) && root.improvise(root.mood, fallback, clean)) {
+      root.forceMood("thinking", 20000)
+      return "thinking"
+    }
+    root.forceMood(fallback, 5000)
+    root.say(Quips.pick(fallback, root.quipContext, root.tone, root.buddyId))
+    return "canned"
+  }
+  property bool askOpen: false
+  function openAsk() { root.closeSettings(); root.askOpen = true; root.ignoredMin = 0 }
+  function closeAsk() { root.askOpen = false }
+
+  // Something another program reported (see Mood.externalEvents).
+  function handleEvent(e) {
+    if (e.kick) root.kickProbe()
+    if (e.mood) { root.forceMood(e.mood, 8000); root.speak(e.mood, false) }
   }
 
   readonly property int maxLineLength: 280
@@ -322,7 +400,7 @@ Item {
     root.forcedMood = name
     forcedTimer.interval = ms
     forcedTimer.restart()
-    root.recompute()
+    root.recompute(true)
   }
 
   Timer {
@@ -341,7 +419,7 @@ Item {
   function celebrate(mood) {
     face.celebrate()
     root.forceMood(mood, 8000)
-    root.speak(mood, false)
+    root.speak(mood, false, true)
   }
   function tally(event) {
     // Stats we have not read yet would hand out every award again.
@@ -362,7 +440,7 @@ Item {
   readonly property int cardOrigin: root.corner === "top-left" ? Item.TopLeft
     : root.corner === "top-right" ? Item.TopRight
     : root.corner === "bottom-left" ? Item.BottomLeft : Item.BottomRight
-  function openSettings() { root.cardOpen = true; root.ignoredMin = 0 }
+  function openSettings() { root.askOpen = false; root.cardOpen = true; root.ignoredMin = 0 }
   function closeSettings() { root.cardOpen = false }
 
   function switchBuddy(id) {
@@ -388,7 +466,9 @@ Item {
     // probeMaxBytes, and this side drops anything larger unparsed, so a
     // collector that buffers to end-of-stream never holds more than that.
     property int probeMaxBytes: 16384
+    property bool again: false
     command: ["timeout", "-k", "2", "15", root.scriptsDir + "/probe.sh"]
+    onExited: if (again) { again = false; Qt.callLater(() => root.kickProbe()) }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -417,6 +497,28 @@ Item {
     running: true; repeat: true; triggeredOnStart: true
     onTriggered: if (!probe.running) probe.running = true
   }
+  // Look now rather than at the next tick: a hook said git changed, the
+  // cable went in. A kick during a run is remembered and runs once after it.
+  function kickProbe() {
+    if (probe.running) probe.again = true
+    else probe.running = true
+  }
+
+  // ----------------------------------------------------------------- senses
+  Senses {
+    id: senses
+    desktop: root.senseDesktop
+    devices: root.senseDevices
+    music: root.senseMusic
+    onSensed: function(name) {
+      if (!root.knownMood(name)) return
+      root.forceMood(name, 8000)
+      root.speak(name, false)
+    }
+    onKick: root.kickProbe()
+  }
+  // A fullscreen window has the stage: the buddy fades and keeps quiet.
+  readonly property bool hushed: senses.fullscreen
 
   // Work streak: minutes of continuous activity, reset by four idle minutes.
   IdleMonitor {
@@ -454,6 +556,7 @@ Item {
   Process {
     id: ollama
     property string moodForLine: "idle"
+    property bool asking: false
     // ollama.sh prints one line of at most 120 characters; anything over
     // 1 KiB here is dropped unread and a canned line is used instead.
     property int maxBytes: 1024
@@ -461,16 +564,30 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         const got = text.length > ollama.maxBytes ? "" : String(text || "").trim()
+        if (ollama.asking) root.forceMood(got ? "asked" : "askBusy", 5000)
         root.say(got ? got : Quips.pick(ollama.moodForLine, root.quipContext, root.tone, root.buddyId))
       }
     }
-    onExited: function(code) { if (code !== 0) root.say(Quips.pick(ollama.moodForLine, root.quipContext, root.tone, root.buddyId)) }
+    onExited: function(code) {
+      if (code === 0) return
+      if (ollama.asking) root.forceMood("askBusy", 5000)
+      root.say(Quips.pick(ollama.moodForLine, root.quipContext, root.tone, root.buddyId))
+    }
   }
 
   // ------------------------------------------------------------------- ipc
   IpcHandler {
     target: "omabuddy"
     function say(text: string): string { root.say(text); return "ok" }
+    function ask(text: string): string { return root.ask(text) }
+    function listen(): string { root.askOpen ? root.closeAsk() : root.openAsk(); return root.askOpen ? "listening" : "closed" }
+    function event(name: string): string {
+      const n = String(name).slice(0, 64)
+      const e = n.length <= 32 ? Mood.externalEvent(n) : null
+      if (!e) return "unknown event: " + n + " (" + Object.keys(Mood.externalEvents).join(", ") + ")"
+      root.handleEvent(e)
+      return "ok"
+    }
     function poke(): string { root.poke(); return "ok" }
     function mood(name: string): string {
       if (!root.knownMood(name)) return "unknown mood: " + String(name).slice(0, 64)
@@ -478,8 +595,11 @@ Item {
     }
     function settings(): string { root.cardOpen ? root.closeSettings() : root.openSettings(); return root.cardOpen ? "open" : "closed" }
     function state(): string {
-      return JSON.stringify({ mood: root.mood, reason: root.moodReason, buddy: root.buddyId, tone: root.tone, streakMin: root.streakMin, muted: root.muted,
-                              costume: root.costume.name, installedOn: root.installedOn, stats: root.stats, sensors: root.sensors })
+      return JSON.stringify({ mood: root.mood, reason: root.moodReason, line: root.line, buddy: root.buddyId, tone: root.tone, streakMin: root.streakMin, muted: root.muted,
+                              costume: root.costume.name, installedOn: root.installedOn, stats: root.stats, sensors: root.sensors,
+                              llm: { inFlight: ollama.running, lastHour: root.llmLastHour().length,
+                                     perHour: root.llmPerHour, cooldown: root.llmCooldown },
+                              senses: { desktop: root.senseDesktop, devices: root.senseDevices, music: root.senseMusic, hushed: root.hushed } })
     }
     function celebrate(name: string): string {
       const what = name || "firstPush"
@@ -487,10 +607,11 @@ Item {
       root.celebrate(what); return "ok"
     }
     function set(name: string, value: string): string {
-      const known = ["corner", "size", "buddy", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "allowRemoteLlm", "probeSeconds"]
+      const known = ["corner", "size", "buddy", "tone", "chattiness", "muted", "llm", "ollamaUrl", "ollamaModel", "allowRemoteLlm", "probeSeconds",
+                     "llmCooldown", "llmPerHour", "senseDesktop", "senseDevices", "senseMusic"]
       if (known.indexOf(name) === -1) return "unknown setting: " + name + " (" + known.join(", ") + ")"
       let v = value
-      if (name === "muted" || name === "allowRemoteLlm") v = value === "true"
+      if (name === "muted" || name === "allowRemoteLlm" || name.indexOf("sense") === 0) v = value === "true"
       else if (name === "ollamaUrl" && !root.validUrl(value)) return "ollamaUrl must be an http:// or https:// URL of at most 256 characters"
       else if (name === "ollamaModel" && !root.validModel(value)) return "ollamaModel must be 1 to 128 of A-Z a-z 0-9 . _ : / -"
       else if (name === "corner" && root.corners.indexOf(value) === -1) return "corner must be one of " + root.corners.join(", ")
@@ -498,6 +619,8 @@ Item {
       else if (name === "size") { v = Number(value); if (!(v >= root.minSize && v <= root.maxSize)) return "size must be " + root.minSize + " to " + root.maxSize }
       else if (name === "chattiness") { v = Number(value); if (!(v >= 1 && v <= 240)) return "chattiness must be 1 to 240 minutes" }
       else if (name === "probeSeconds") { v = Number(value); if (!(v >= 5 && v <= 3600)) return "probeSeconds must be 5 to 3600" }
+      else if (name === "llmCooldown") { v = Number(value); if (!(v >= 5 && v <= 600)) return "llmCooldown must be 5 to 600 seconds" }
+      else if (name === "llmPerHour") { v = Number(value); if (!(v >= 1 && v <= 240)) return "llmPerHour must be 1 to 240" }
       else if (name === "tone" && Quips.toneIds().indexOf(value) === -1) return "tone must be one of " + Quips.toneIds().join(", ")
       else if (name === "buddy") {
         if (Buddies.ids().indexOf(value) === -1) return "buddy must be one of " + Buddies.ids().join(", ")
@@ -533,19 +656,31 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "omarchy-omabuddy"
     WlrLayershell.layer: WlrLayer.Top
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    // No keyboard unless the ask box is open. Then, as the shell's own
+    // keyboard panels do, take focus Exclusive for a moment so it lands,
+    // and settle on OnDemand so the rest of the desktop stays clickable.
+    property bool focusPrimed: false
+    WlrLayershell.keyboardFocus: root.askOpen
+      ? (focusPrimed ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.Exclusive)
+      : WlrKeyboardFocus.None
+    Connections {
+      target: root
+      function onAskOpenChanged() { panel.focusPrimed = false; if (root.askOpen) focusPrime.restart(); else focusPrime.stop() }
+    }
+    Timer { id: focusPrime; interval: 75; onTriggered: if (root.askOpen) panel.focusPrimed = true }
     exclusionMode: ExclusionMode.Ignore
     // Only the buddy takes input; the rest of the screen is click-through.
-    // While the settings card is open the whole window takes clicks, so a
-    // click anywhere else closes the card (and goes no further).
-    mask: Region { item: root.cardOpen ? catcher : buddy }
+    // While the settings card or the ask box is open the whole window takes
+    // clicks, so a click anywhere else closes it (and goes no further).
+    readonly property bool popupOpen: root.cardOpen || root.askOpen
+    mask: Region { item: panel.popupOpen ? catcher : buddy }
 
     readonly property int margin: Style.gapsOut + Style.space(8)
 
     MouseArea {
       id: catcher
       anchors.fill: parent
-      enabled: root.cardOpen
+      enabled: panel.popupOpen
       acceptedButtons: Qt.AllButtons
       // Presses on the critter belong to the critter (a right-click there
       // closes the card through its own handler).
@@ -553,6 +688,7 @@ Item {
         const p = mapToItem(buddy, mouse.x, mouse.y)
         if (buddy.contains(p)) { mouse.accepted = false; return }
         root.closeSettings()
+        root.closeAsk()
       }
     }
 
@@ -560,6 +696,8 @@ Item {
       id: buddy
       width: face.implicitWidth
       height: face.implicitHeight
+      opacity: root.hushed && !drag.active ? 0.35 : 1
+      Behavior on opacity { NumberAnimation { duration: 400 } }
 
       readonly property bool atRight: root.corner.indexOf("right") !== -1
       readonly property bool atBottom: root.corner.indexOf("top") === -1
@@ -665,6 +803,21 @@ Item {
       y: Math.max(panel.margin, Math.min(panel.height - h - panel.margin,
            buddy.atBottom ? buddy.y + buddy.height - h : buddy.y))
       sourceComponent: SettingsCard { host: root }
+    }
+
+    // Ask box: same place as the card.
+    Loader {
+      id: askBox
+      active: root.askOpen
+      z: 2
+      readonly property int gap: Style.space(10)
+      readonly property real w: item ? item.width : 0
+      readonly property real h: item ? item.height : 0
+      x: Math.max(panel.margin, Math.min(panel.width - w - panel.margin,
+           buddy.atRight ? buddy.x - w - gap : buddy.x + buddy.width + gap))
+      y: Math.max(panel.margin, Math.min(panel.height - h - panel.margin,
+           buddy.atBottom ? buddy.y + buddy.height - h : buddy.y))
+      sourceComponent: AskBox { host: root }
     }
 
     // Speech bubble: foreground on background, one sharp corner pointing at
